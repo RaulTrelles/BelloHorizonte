@@ -1,0 +1,40 @@
+# ==============================================================================
+# Seguridad y Secretos (NUNCA versionar — Harness Rule 01)
+# ==============================================================================
+.env
+.env.local
+.env.*.local
+*.env
+!.env.example
+
+# Firebase / Android Signing
+google-services.json
+GoogleService-Info.plist
+*firebase-adminsdk*.json
+serviceAccountKey.json
+*.jks
+*.keystore
+key.properties
+
+# Logs locales del Agent Harness
+.agents/logs/
+
+# ==============================================================================
+# Dependencias y Builds
+# ==============================================================================
+node_modules/
+.next/
+out/
+dist/
+build/
+coverage/
+.vercel/
+.expo/
+android-app/android/app/build/
+android-app/android/.gradle/
+android-app/android/local.properties
+
+# Sistema / IDE
+.DS_Store
+Thumbs.db
+*.log

@@ -1,0 +1,32 @@
+{
+  "bello-horizonte-safety-guard": {
+    "enabled": true,
+    "PreToolUse": [
+      {
+        "matcher": "run_command",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "powershell -NoProfile -ExecutionPolicy Bypass -File ./hooks/safety-guard.ps1",
+            "timeout": 10
+          }
+        ]
+      }
+    ]
+  },
+  "bello-horizonte-audit-log": {
+    "enabled": true,
+    "PostToolUse": [
+      {
+        "matcher": "run_command|write_file|edit_file",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "powershell -NoProfile -ExecutionPolicy Bypass -File ./hooks/audit-log.ps1",
+            "timeout": 10
+          }
+        ]
+      }
+    ]
+  }
+}
