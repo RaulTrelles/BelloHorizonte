@@ -30,6 +30,7 @@ build/
 coverage/
 .vercel/
 .expo/
+supabase/.temp/
 android-app/android/
 
 # Sistema / IDE

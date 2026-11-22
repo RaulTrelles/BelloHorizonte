@@ -10,18 +10,28 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import {
   formatAlertHeadline,
+  formatAlertTime,
   silenceAlarmForOneMinute,
   stopPanicAlarm,
 } from '../services/alarmController';
+import {
+  acknowledgeAlert,
+  buildPanicAlertWhatsAppText,
+  openWhatsAppShare,
+} from '../services/belloHorizonteApi';
 import type { ActiveAlarmState } from '../types/alarm';
 
 const ACK_LOCK_SECONDS = 10;
 
 interface PanicAlertScreenProps {
   alarmState: ActiveAlarmState;
+  currentUserId?: string | null;
 }
 
-export function PanicAlertScreen({ alarmState }: PanicAlertScreenProps): React.JSX.Element | null {
+export function PanicAlertScreen({
+  alarmState,
+  currentUserId,
+}: PanicAlertScreenProps): React.JSX.Element | null {
   const alert = alarmState.alert;
   const [ackCountdown, setAckCountdown] = useState<number>(ACK_LOCK_SECONDS);
   const [silenceRemainingSec, setSilenceRemainingSec] = useState<number>(0);
@@ -85,10 +95,21 @@ export function PanicAlertScreen({ alarmState }: PanicAlertScreenProps): React.J
     if (!canAcknowledge) {
       return;
     }
+    if (currentUserId && !alert.isTest) {
+      // Registrar "enterado" en Supabase sin bloquear el apagado de la sirena si falla la red
+      acknowledgeAlert(alert.alertId, currentUserId, 'enterado').catch((err) => {
+        console.warn('[PanicAlertScreen] Error registrando alert_ack enterado:', err);
+      });
+    }
     await stopPanicAlarm(alert.alertId);
   };
 
   const handleSilenceOneMinute = async (): Promise<void> => {
+    if (currentUserId && !alert.isTest) {
+      acknowledgeAlert(alert.alertId, currentUserId, 'silenciado_1m').catch((err) => {
+        console.warn('[PanicAlertScreen] Error registrando alert_ack silenciado_1m:', err);
+      });
+    }
     await silenceAlarmForOneMinute();
   };
 
@@ -117,6 +138,21 @@ export function PanicAlertScreen({ alarmState }: PanicAlertScreenProps): React.J
         'No se pudo abrir el mapa',
         `Coordenadas reportadas: ${alert.lat}, ${alert.lng}`
       );
+    }
+  };
+
+  const handleShareWhatsApp = async (): Promise<void> => {
+    const text = buildPanicAlertWhatsAppText({
+      groupName: alert.groupName || 'Asociación Bello Horizonte',
+      senderName: alert.senderName,
+      timeLabel: formatAlertTime(alert.timestamp),
+      lat: alert.lat,
+      lng: alert.lng,
+    });
+    try {
+      await openWhatsAppShare(text);
+    } catch {
+      Alert.alert('WhatsApp no disponible', 'No se pudo abrir WhatsApp en este dispositivo.');
     }
   };
 
@@ -192,9 +228,14 @@ export function PanicAlertScreen({ alarmState }: PanicAlertScreenProps): React.J
             </Text>
           </Pressable>
 
-          <Pressable style={styles.callButton} onPress={handleCall105}>
-            <Text style={styles.callButtonText}>Llamar 105 (Policía / Serenazgo)</Text>
-          </Pressable>
+          <View style={styles.secondaryRow}>
+            <Pressable style={styles.callButton} onPress={handleCall105}>
+              <Text style={styles.callButtonText}>Llamar 105</Text>
+            </Pressable>
+            <Pressable style={styles.whatsappButton} onPress={handleShareWhatsApp}>
+              <Text style={styles.whatsappButtonText}>WhatsApp</Text>
+            </Pressable>
+          </View>
         </View>
       </View>
     </SafeAreaView>
@@ -316,15 +357,32 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '800',
   },
+  secondaryRow: {
+    flexDirection: 'row',
+    gap: 10,
+  },
   callButton: {
+    flex: 1,
     backgroundColor: '#111827',
     borderRadius: 14,
-    paddingVertical: 16,
+    paddingVertical: 15,
     alignItems: 'center',
   },
   callButtonText: {
     color: '#FFFFFF',
-    fontSize: 16,
+    fontSize: 15,
+    fontWeight: '800',
+  },
+  whatsappButton: {
+    flex: 1,
+    backgroundColor: '#15803D',
+    borderRadius: 14,
+    paddingVertical: 15,
+    alignItems: 'center',
+  },
+  whatsappButtonText: {
+    color: '#FFFFFF',
+    fontSize: 15,
     fontWeight: '800',
   },
 });
