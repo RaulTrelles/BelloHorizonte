@@ -16,6 +16,7 @@ export default ({ config }: ConfigContext): ExpoConfig => {
     ...config,
     name: 'Bello Horizonte Alarma',
     slug: 'bello-horizonte-alarma',
+    scheme: 'pe.bellohorizonte.alarma',
     version: '0.1.0',
     orientation: 'portrait',
     userInterfaceStyle: 'light',

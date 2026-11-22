@@ -343,18 +343,21 @@ export function AlertsTab({
                         )}
                       </span>
 
-                      {alert.lat !== null && alert.lng !== null && (
-                        <a
-                          href={`https://www.google.com/maps?q=${alert.lat},${alert.lng}`}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="inline-flex items-center gap-1 font-semibold text-brand-700 underline hover:text-brand-900"
-                        >
-                          <MapPin className="h-3.5 w-3.5" />
-                          Ver ubicación ({alert.lat.toFixed(4)},{" "}
-                          {alert.lng.toFixed(4)})
-                        </a>
-                      )}
+                      {typeof alert.lat === "number" &&
+                        Number.isFinite(alert.lat) &&
+                        typeof alert.lng === "number" &&
+                        Number.isFinite(alert.lng) && (
+                          <a
+                            href={`https://www.google.com/maps?q=${alert.lat},${alert.lng}`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="inline-flex items-center gap-1 font-semibold text-brand-700 underline hover:text-brand-900"
+                          >
+                            <MapPin className="h-3.5 w-3.5" />
+                            Ver ubicación ({alert.lat.toFixed(4)},{" "}
+                            {alert.lng.toFixed(4)})
+                          </a>
+                        )}
 
                       {alert.closed_at && (
                         <span className="text-slate-500">

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   Users,
   KeyRound,
@@ -76,6 +76,15 @@ export function MembersTab({
   const [loadingCode, setLoadingCode] = useState(false);
   const [regeneratingCode, setRegeneratingCode] = useState(false);
   const [copiedCode, setCopiedCode] = useState(false);
+  const copiedTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (copiedTimeoutRef.current !== null) {
+        clearTimeout(copiedTimeoutRef.current);
+      }
+    };
+  }, []);
 
   const loadMembers = useCallback(async () => {
     const supabase = getSupabaseBrowserClient();
@@ -209,7 +218,13 @@ export function MembersTab({
     try {
       await navigator.clipboard.writeText(inviteCode);
       setCopiedCode(true);
-      setTimeout(() => setCopiedCode(false), 2000);
+      if (copiedTimeoutRef.current !== null) {
+        clearTimeout(copiedTimeoutRef.current);
+      }
+      copiedTimeoutRef.current = setTimeout(() => {
+        setCopiedCode(false);
+        copiedTimeoutRef.current = null;
+      }, 2000);
     } catch {
       // Fallback silencioso si el navegador bloquea el portapapeles
     }

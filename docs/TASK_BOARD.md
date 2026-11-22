@@ -31,6 +31,8 @@
 | BH-022 | Implementar 8 pantallas MVP en App Android (Unirse por código + Ley 29733, Pendiente, Principal 2s + semáforo permisos, Confirmación 5s, Alarma roja + 105 + "Estoy enterado" 10s, Historial, Admin 2 admins, Permisos guiados) | `android-developer` | `DONE` | BH-020, BH-021 |
 | BH-023 | Implementar Portal Web en Vercel/Next.js (Info Asociación Bello Horizonte, comunicados, política de privacidad pública Ley 29733 y consola admin) | `frontend-developer` | `DONE` | BH-020 |
 | BH-024 | Añadir botón gratuito "Compartir alerta por WhatsApp" (`wa.me`) y prueba local de alarma en App Android | `android-developer` | `DONE` | BH-022 |
+| BH-025 | Ajustes UX/Roles Android: restringir "Probar alarma local" y "Simular alerta" solo a `admin`; menú superior unificado (Login / Permisos / Salir) | `android-developer` | `DONE` | BH-024 |
+| BH-026 | Login dual (Correo + Google OAuth) en App Android y Portal Web vía Supabase Auth (`pe.bellohorizonte.alarma://auth-callback`) | `android-developer` + `frontend-developer` | `DONE` | Credenciales Google OAuth en Supabase |
 
 ---
 

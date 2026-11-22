@@ -1,10 +1,18 @@
 const mockRpc = jest.fn();
 const mockFrom = jest.fn();
 const mockSignOut = jest.fn();
+const mockSignInWithOAuth = jest.fn();
+const mockExchangeCodeForSession = jest.fn();
+const mockSetSession = jest.fn();
+const mockOpenAuthSessionAsync = jest.fn();
 
 jest.mock('react-native', () => ({
   Platform: { OS: 'android', constants: { Brand: 'OPPO', Model: 'CPH2525' } },
   Linking: { openURL: jest.fn().mockResolvedValue(undefined) },
+}));
+
+jest.mock('expo-web-browser', () => ({
+  openAuthSessionAsync: (...args: unknown[]) => mockOpenAuthSessionAsync(...args),
 }));
 
 jest.mock('../supabaseClient', () => ({
@@ -13,6 +21,9 @@ jest.mock('../supabaseClient', () => ({
     from: mockFrom,
     auth: {
       signOut: mockSignOut,
+      signInWithOAuth: mockSignInWithOAuth,
+      exchangeCodeForSession: mockExchangeCodeForSession,
+      setSession: mockSetSession,
     },
   }),
 }));
@@ -23,15 +34,19 @@ import {
   buildInviteWhatsAppText,
   buildPanicAlertWhatsAppText,
   buildWhatsAppShareUrl,
+  canUseAdminTestControls,
   closePanicAlert,
   CooldownActiveError,
   createPanicAlert,
   deleteMyAccount,
+  extractOAuthCallbackParams,
   getGroupInviteCode,
   GROUPS_SAFE_COLUMNS,
   isCooldownError,
+  OAUTH_REDIRECT_URI,
   PROFILES_SAFE_COLUMNS,
   regenerateGroupInviteCode,
+  signInWithGoogle,
   updateMyFcmToken,
 } from '../belloHorizonteApi';
 
@@ -45,6 +60,15 @@ describe('belloHorizonteApi', () => {
     expect(GROUPS_SAFE_COLUMNS).not.toContain('codigo');
     expect(PROFILES_SAFE_COLUMNS).not.toContain('fcm_token');
     expect(ADMIN_PROFILES_SAFE_COLUMNS).not.toContain('fcm_token');
+  });
+
+  it('restringe controles de prueba/simulación estrictamente a rol admin (BH-025)', () => {
+    expect(canUseAdminTestControls('admin')).toBe(true);
+    expect(canUseAdminTestControls('miembro')).toBe(false);
+    expect(canUseAdminTestControls('presidente')).toBe(false);
+    expect(canUseAdminTestControls('secretario')).toBe(false);
+    expect(canUseAdminTestControls(null)).toBe(false);
+    expect(canUseAdminTestControls(undefined)).toBe(false);
   });
 
   it('actualiza fcm_token exclusivamente mediante RPC update_my_fcm_token', async () => {
@@ -119,7 +143,7 @@ describe('belloHorizonteApi', () => {
     expect(mockSignOut).toHaveBeenCalledTimes(1);
   });
 
-  it('construye enlaces wa.me válidos para alertas e invitaciones', () => {
+  it('construye enlaces wa.me válidos y omite ubicación si lat/lng están vacíos', () => {
     const alertText = buildPanicAlertWhatsAppText({
       groupName: 'Asociación Bello Horizonte',
       senderName: 'María Pérez',
@@ -130,12 +154,96 @@ describe('belloHorizonteApi', () => {
     const url = buildWhatsAppShareUrl(alertText);
     expect(url.startsWith('https://wa.me/?text=')).toBe(true);
     expect(alertText).toContain('¡ALERTA! Robo en la cuadra – María Pérez avisó a las 22:15');
+    expect(alertText).toContain('google.com/maps');
     expect(alertText).toContain('105');
+
+    const blankCoordsText = buildPanicAlertWhatsAppText({
+      groupName: 'Asociación Bello Horizonte',
+      senderName: 'María Pérez',
+      timeLabel: '22:15',
+      lat: '   ',
+      lng: '',
+    });
+    expect(blankCoordsText).not.toContain('google.com/maps');
 
     const inviteText = buildInviteWhatsAppText({
       groupName: 'Asociación Bello Horizonte',
       inviteCode: 'BH-2026',
     });
     expect(inviteText).toContain('BH-2026');
+  });
+
+  it('signInWithGoogle intercambia code PKCE por sesión correctamente (BH-026)', async () => {
+    mockSignInWithOAuth.mockResolvedValueOnce({
+      data: { url: 'https://supabase.co/auth/v1/authorize?provider=google' },
+      error: null,
+    });
+    mockOpenAuthSessionAsync.mockResolvedValueOnce({
+      type: 'success',
+      url: `${OAUTH_REDIRECT_URI}?code=pkce-code-123`,
+    });
+    const fakeSession = { access_token: 'tok', user: { id: 'u-1' } };
+    mockExchangeCodeForSession.mockResolvedValueOnce({
+      data: { session: fakeSession },
+      error: null,
+    });
+
+    const res = await signInWithGoogle();
+
+    expect(mockSignInWithOAuth).toHaveBeenCalledWith({
+      provider: 'google',
+      options: {
+        redirectTo: OAUTH_REDIRECT_URI,
+        skipBrowserRedirect: true,
+      },
+    });
+    expect(mockOpenAuthSessionAsync).toHaveBeenCalledWith(
+      'https://supabase.co/auth/v1/authorize?provider=google',
+      OAUTH_REDIRECT_URI
+    );
+    expect(mockExchangeCodeForSession).toHaveBeenCalledWith('pkce-code-123');
+    expect(res).toEqual({ cancelled: false, session: fakeSession });
+  });
+
+  it('signInWithGoogle soporta fallback con #access_token y #refresh_token y cancelación', async () => {
+    // 1. Fallback implícito
+    mockSignInWithOAuth.mockResolvedValueOnce({
+      data: { url: 'https://supabase.co/auth/v1/authorize?provider=google' },
+      error: null,
+    });
+    mockOpenAuthSessionAsync.mockResolvedValueOnce({
+      type: 'success',
+      url: `${OAUTH_REDIRECT_URI}#access_token=acc-1&refresh_token=ref-2`,
+    });
+    const fakeSession = { access_token: 'acc-1', user: { id: 'u-2' } };
+    mockSetSession.mockResolvedValueOnce({
+      data: { session: fakeSession },
+      error: null,
+    });
+
+    const fallbackRes = await signInWithGoogle();
+    expect(mockSetSession).toHaveBeenCalledWith({
+      access_token: 'acc-1',
+      refresh_token: 'ref-2',
+    });
+    expect(fallbackRes).toEqual({ cancelled: false, session: fakeSession });
+
+    // 2. Cancelación por el usuario
+    mockSignInWithOAuth.mockResolvedValueOnce({
+      data: { url: 'https://supabase.co/auth/v1/authorize?provider=google' },
+      error: null,
+    });
+    mockOpenAuthSessionAsync.mockResolvedValueOnce({ type: 'cancel' });
+
+    const cancelRes = await signInWithGoogle();
+    expect(cancelRes).toEqual({ cancelled: true, session: null });
+
+    // 3. Parser de callback
+    expect(extractOAuthCallbackParams(`${OAUTH_REDIRECT_URI}?error_description=access_denied`)).toEqual({
+      code: undefined,
+      accessToken: undefined,
+      refreshToken: undefined,
+      errorDescription: 'access_denied',
+    });
   });
 });

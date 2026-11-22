@@ -19,6 +19,7 @@ import {
 } from '../services/alarmController';
 import {
   buildPanicAlertWhatsAppText,
+  canUseAdminTestControls,
   closePanicAlert,
   createPanicAlert,
   deleteMyAccount,
@@ -27,7 +28,6 @@ import {
   getGroupAlertsHistory,
   isCooldownError,
   openWhatsAppShare,
-  signOutUser,
   subscribeToGroupAlertsRealtime,
 } from '../services/belloHorizonteApi';
 import type { PermissionStatusMap } from '../types/alarm';
@@ -335,12 +335,19 @@ export function HomeScreen({
     );
   };
 
-  const handleSignOut = async (): Promise<void> => {
+  const handleOpenPrivacyPolicy = async (): Promise<void> => {
+    const url = assocInfo?.politica_privacidad_url?.trim() ?? '';
+    if (!/^https?:\/\//i.test(url)) {
+      Alert.alert(
+        'Enlace no disponible',
+        'La URL de la Política de Privacidad no es válida o aún no fue configurada.'
+      );
+      return;
+    }
     try {
-      await signOutUser();
-      await onSignedOut();
-    } catch (err) {
-      Alert.alert('Error', err instanceof Error ? err.message : 'No se pudo cerrar sesión.');
+      await Linking.openURL(url);
+    } catch {
+      Alert.alert('Error', 'No se pudo abrir la Política de Privacidad en el navegador.');
     }
   };
 
@@ -369,6 +376,7 @@ export function HomeScreen({
     );
   };
 
+  const isAdmin = canUseAdminTestControls(membership.rol);
   const allCriticalPermissionsOk =
     permissions.notifications &&
     permissions.fullScreenIntent &&
@@ -379,23 +387,10 @@ export function HomeScreen({
     : [];
   const canCloseActive =
     Boolean(activeAlert) &&
-    (activeAlert?.user_id === currentUserId || membership.rol === 'admin');
+    (activeAlert?.user_id === currentUserId || isAdmin);
 
   return (
     <ScrollView contentContainerStyle={styles.scrollContent}>
-      {/* Cabecera */}
-      <View style={styles.headerRow}>
-        <View style={styles.headerInfo}>
-          <Text style={styles.title}>{membership.group.nombre}</Text>
-          <Text style={styles.subtitle}>
-            {profile?.nombre || 'Vecino'} · {membership.rol.toUpperCase()}
-          </Text>
-        </View>
-        <Pressable style={styles.signOutBtn} onPress={handleSignOut}>
-          <Text style={styles.signOutText}>Salir</Text>
-        </Pressable>
-      </View>
-
       {!isNativeAlarmAvailable() && (
         <View style={styles.warningPill}>
           <Text style={styles.warningPillText}>
@@ -586,11 +581,7 @@ export function HomeScreen({
               </View>
             ))}
             {assocInfo?.politica_privacidad_url && (
-              <Pressable
-                onPress={() =>
-                  Linking.openURL(assocInfo.politica_privacidad_url!).catch(() => {})
-                }
-              >
+              <Pressable onPress={handleOpenPrivacyPolicy}>
                 <Text style={styles.smallLinkText}>Ver Política de Privacidad (Ley 29733)</Text>
               </Pressable>
             )}
@@ -598,27 +589,33 @@ export function HomeScreen({
         )}
       </View>
 
-      {/* Herramientas de Prueba y WhatsApp */}
+      {/* Difusión y (solo para Admin) Pruebas de Alarma */}
       <View style={styles.card}>
-        <Text style={styles.cardTitle}>Pruebas y Difusión</Text>
+        <Text style={styles.cardTitle}>
+          {isAdmin ? 'Pruebas (Solo Admin) y Difusión' : 'Difusión Comunitaria'}
+        </Text>
         <View style={styles.testButtonsRow}>
-          <Pressable
-            style={[styles.secondaryButton, testingLocalAlarm && styles.secondaryButtonActive]}
-            onPress={handleLocalTestAlarm}
-            disabled={testingLocalAlarm}
-          >
-            <Text style={styles.secondaryButtonText}>
-              {testingLocalAlarm ? 'Sonando prueba (5s)...' : 'Probar alarma local (5s)'}
-            </Text>
-          </Pressable>
+          {isAdmin && (
+            <Pressable
+              style={[styles.secondaryButton, testingLocalAlarm && styles.secondaryButtonActive]}
+              onPress={handleLocalTestAlarm}
+              disabled={testingLocalAlarm}
+            >
+              <Text style={styles.secondaryButtonText}>
+                {testingLocalAlarm ? 'Sonando prueba (5s)...' : 'Probar alarma local (5s)'}
+              </Text>
+            </Pressable>
+          )}
 
           <Pressable style={styles.whatsappBtn} onPress={() => handleShareWhatsApp(latestAlert)}>
             <Text style={styles.whatsappBtnText}>Compartir por WhatsApp (wa.me)</Text>
           </Pressable>
 
-          <Pressable style={styles.simulateButton} onPress={handleSimulateIncomingAlert}>
-            <Text style={styles.simulateButtonText}>Simular alerta recibida (demo local)</Text>
-          </Pressable>
+          {isAdmin && (
+            <Pressable style={styles.simulateButton} onPress={handleSimulateIncomingAlert}>
+              <Text style={styles.simulateButtonText}>Simular alerta recibida (solo admin)</Text>
+            </Pressable>
+          )}
         </View>
       </View>
 

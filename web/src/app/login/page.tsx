@@ -21,7 +21,12 @@ import {
 type AuthMode = "login" | "register";
 
 function getSafeRedirect(raw: string | null): string {
-  if (!raw || !raw.startsWith("/") || raw.startsWith("//")) {
+  if (
+    !raw ||
+    !raw.startsWith("/") ||
+    raw.startsWith("//") ||
+    raw.includes("\\")
+  ) {
     return "/admin";
   }
   return raw;
@@ -38,6 +43,7 @@ function LoginFormContent() {
   const [password, setPassword] = useState("");
   const [consentimiento, setConsentimiento] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [googleLoading, setGoogleLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [infoMsg, setInfoMsg] = useState<string | null>(null);
 
@@ -53,6 +59,39 @@ function LoginFormContent() {
       }
     });
   }, [router, redirectTo]);
+
+  async function handleGoogleSignIn() {
+    setErrorMsg(null);
+    setInfoMsg(null);
+
+    const supabase = getSupabaseBrowserClient();
+    if (!supabase) {
+      setErrorMsg(
+        "Supabase no está configurado. Define NEXT_PUBLIC_SUPABASE_URL y NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY."
+      );
+      return;
+    }
+
+    setGoogleLoading(true);
+    try {
+      const { error } = await supabase.auth.signInWithOAuth({
+        provider: "google",
+        options: {
+          redirectTo: `${window.location.origin}${redirectTo}`,
+        },
+      });
+
+      if (error) {
+        setErrorMsg(
+          error.message || "No se pudo iniciar sesión con Google."
+        );
+        setGoogleLoading(false);
+      }
+    } catch {
+      setErrorMsg("Ocurrió un error inesperado al iniciar sesión con Google.");
+      setGoogleLoading(false);
+    }
+  }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -78,8 +117,8 @@ function LoginFormContent() {
         setErrorMsg("Ingresa tu nombre completo.");
         return;
       }
-      if (password.length < 6) {
-        setErrorMsg("La contraseña debe tener al menos 6 caracteres.");
+      if (password.length < 8) {
+        setErrorMsg("La contraseña debe tener al menos 8 caracteres.");
         return;
       }
       if (!consentimiento) {
@@ -235,7 +274,61 @@ function LoginFormContent() {
           </div>
         )}
 
-        <form onSubmit={handleSubmit} className="mt-5 space-y-4">
+        {/* Botón Google OAuth */}
+        <div className="mt-5">
+          <button
+            type="button"
+            onClick={handleGoogleSignIn}
+            disabled={googleLoading || loading || !configured}
+            className="flex w-full items-center justify-center gap-2.5 rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-sm font-semibold text-slate-800 shadow-sm transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {googleLoading ? (
+              <>
+                <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+                Conectando con Google...
+              </>
+            ) : (
+              <>
+                <svg
+                  className="h-4 w-4"
+                  viewBox="0 0 24 24"
+                  aria-hidden="true"
+                >
+                  <path
+                    fill="#4285F4"
+                    d="M23.49 12.27c0-.79-.07-1.54-.2-2.27H12v4.3h6.45a5.52 5.52 0 0 1-2.39 3.62v3h3.87c2.26-2.08 3.56-5.15 3.56-8.65z"
+                  />
+                  <path
+                    fill="#34A853"
+                    d="M12 24c3.24 0 5.95-1.07 7.93-2.91l-3.87-3c-1.07.72-2.45 1.15-4.06 1.15-3.12 0-5.77-2.11-6.71-4.95H1.29v3.09A12 12 0 0 0 12 24z"
+                  />
+                  <path
+                    fill="#FBBC05"
+                    d="M5.29 14.29A7.2 7.2 0 0 1 4.91 12c0-.79.14-1.56.38-2.29V6.62H1.29A12 12 0 0 0 0 12c0 1.94.46 3.77 1.29 5.38l4-3.09z"
+                  />
+                  <path
+                    fill="#EA4335"
+                    d="M12 4.76c1.76 0 3.34.61 4.58 1.8l3.44-3.44C17.95 1.19 15.24 0 12 0A12 12 0 0 0 1.29 6.62l4 3.09c.94-2.84 3.59-4.95 6.71-4.95z"
+                  />
+                </svg>
+                Continuar con Google
+              </>
+            )}
+          </button>
+
+          <div className="relative my-5">
+            <div className="absolute inset-0 flex items-center" aria-hidden="true">
+              <div className="w-full border-t border-slate-200" />
+            </div>
+            <div className="relative flex justify-center text-xs">
+              <span className="bg-white px-2.5 text-slate-500">
+                o continúa con tu correo
+              </span>
+            </div>
+          </div>
+        </div>
+
+        <form onSubmit={handleSubmit} className="space-y-4">
           {mode === "register" && (
             <div>
               <label
@@ -303,7 +396,7 @@ function LoginFormContent() {
                 id="password"
                 type="password"
                 required
-                minLength={6}
+                minLength={8}
                 autoComplete={
                   mode === "login" ? "current-password" : "new-password"
                 }
@@ -338,7 +431,7 @@ function LoginFormContent() {
 
           <button
             type="submit"
-            disabled={loading || !configured}
+            disabled={loading || googleLoading || !configured}
             className="flex w-full items-center justify-center gap-2 rounded-xl bg-brand-800 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-brand-900 disabled:cursor-not-allowed disabled:opacity-50"
           >
             {loading ? (

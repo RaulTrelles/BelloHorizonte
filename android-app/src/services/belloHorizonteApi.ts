@@ -1,4 +1,5 @@
 import type { Session, User } from '@supabase/supabase-js';
+import * as WebBrowser from 'expo-web-browser';
 import { Linking, Platform } from 'react-native';
 import type {
   AlertAckRecord,
@@ -14,12 +15,23 @@ import type {
   JoinGroupResult,
   MemberNameRow,
   MembershipRecord,
+  MembershipRole,
   MembershipStatus,
   MembershipWithGroup,
   MembershipWithProfile,
   ProfileRecord,
 } from '../types/database';
 import { getSupabaseClient } from './supabaseClient';
+
+export const OAUTH_REDIRECT_URI = 'pe.bellohorizonte.alarma://auth-callback';
+
+/**
+ * Visibilidad estricta de controles de prueba/simulación de alarma (BH-025):
+ * SOLO administradores (`rol === 'admin'`) pueden verlos y ejecutarlos.
+ */
+export function canUseAdminTestControls(role: MembershipRole | null | undefined): boolean {
+  return role === 'admin';
+}
 
 // Columnas explícitas para respetar los privilegios de columna (RLS / Ley 29733):
 // - En groups: NUNCA seleccionar `codigo`
@@ -115,6 +127,107 @@ export async function signOutUser(): Promise<void> {
   if (error) {
     throw error;
   }
+}
+
+export interface OAuthCallbackParams {
+  code?: string;
+  accessToken?: string;
+  refreshToken?: string;
+  errorDescription?: string;
+}
+
+/**
+ * Extrae parámetros PKCE (`?code=...`) o tokens implícitos (`#access_token=...&refresh_token=...`)
+ * desde la URL de retorno de OAuth.
+ */
+export function extractOAuthCallbackParams(callbackUrl: string): OAuthCallbackParams {
+  const queryStart = callbackUrl.indexOf('?');
+  const hashStart = callbackUrl.indexOf('#');
+
+  const queryString =
+    queryStart !== -1
+      ? callbackUrl.slice(queryStart + 1, hashStart !== -1 && hashStart > queryStart ? hashStart : undefined)
+      : '';
+  const hashString = hashStart !== -1 ? callbackUrl.slice(hashStart + 1) : '';
+
+  const queryParams = new URLSearchParams(queryString);
+  const hashParams = new URLSearchParams(hashString);
+
+  const code = queryParams.get('code') || hashParams.get('code') || undefined;
+  const accessToken =
+    hashParams.get('access_token') || queryParams.get('access_token') || undefined;
+  const refreshToken =
+    hashParams.get('refresh_token') || queryParams.get('refresh_token') || undefined;
+  const errorDescription =
+    queryParams.get('error_description') ||
+    hashParams.get('error_description') ||
+    queryParams.get('error') ||
+    hashParams.get('error') ||
+    undefined;
+
+  return {
+    code,
+    accessToken,
+    refreshToken,
+    errorDescription,
+  };
+}
+
+/**
+ * Inicia sesión con Google OAuth (PKCE) mediante expo-web-browser.
+ */
+export async function signInWithGoogle(): Promise<{
+  cancelled: boolean;
+  session: Session | null;
+}> {
+  const supabase = getSupabaseClient();
+  const { data, error } = await supabase.auth.signInWithOAuth({
+    provider: 'google',
+    options: {
+      redirectTo: OAUTH_REDIRECT_URI,
+      skipBrowserRedirect: true,
+    },
+  });
+
+  if (error) {
+    throw error;
+  }
+  if (!data?.url) {
+    throw new Error('No se pudo obtener la URL de autenticación de Google.');
+  }
+
+  const authResult = await WebBrowser.openAuthSessionAsync(data.url, OAUTH_REDIRECT_URI);
+
+  if (authResult.type !== 'success' || !authResult.url) {
+    return { cancelled: true, session: null };
+  }
+
+  const parsed = extractOAuthCallbackParams(authResult.url);
+  if (parsed.errorDescription) {
+    throw new Error(parsed.errorDescription);
+  }
+
+  if (parsed.code) {
+    const { data: exchangeData, error: exchangeError } =
+      await supabase.auth.exchangeCodeForSession(parsed.code);
+    if (exchangeError) {
+      throw exchangeError;
+    }
+    return { cancelled: false, session: exchangeData.session };
+  }
+
+  if (parsed.accessToken && parsed.refreshToken) {
+    const { data: sessionData, error: sessionError } = await supabase.auth.setSession({
+      access_token: parsed.accessToken,
+      refresh_token: parsed.refreshToken,
+    });
+    if (sessionError) {
+      throw sessionError;
+    }
+    return { cancelled: false, session: sessionData.session };
+  }
+
+  throw new Error('La respuesta de Google OAuth no incluyó código ni sesión válida.');
 }
 
 // ============================================================================
@@ -590,8 +703,16 @@ export function buildPanicAlertWhatsAppText(params: {
     `🚨 ¡ALERTA! Robo en la cuadra – ${params.senderName} avisó a las ${params.timeLabel}`,
     `Grupo: ${params.groupName}`,
   ];
-  if (params.lat !== undefined && params.lat !== null && params.lng !== undefined && params.lng !== null) {
-    lines.push(`Ubicación: https://www.google.com/maps/search/?api=1&query=${params.lat},${params.lng}`);
+  const latStr =
+    params.lat !== undefined && params.lat !== null ? String(params.lat).trim() : '';
+  const lngStr =
+    params.lng !== undefined && params.lng !== null ? String(params.lng).trim() : '';
+  if (latStr.length > 0 && lngStr.length > 0) {
+    lines.push(
+      `Ubicación: https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(
+        `${latStr},${lngStr}`
+      )}`
+    );
   }
   lines.push('Emergencia PNP / Serenazgo Perú: 105');
   return lines.join('\n');

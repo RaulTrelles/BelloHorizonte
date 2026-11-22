@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -15,20 +15,26 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import {
   joinGroupByCode,
   signInWithEmail,
+  signInWithGoogle,
   signOutUser,
   signUpWithEmail,
 } from '../services/belloHorizonteApi';
 
 type AuthMode = 'register' | 'login';
 
+const MIN_PASSWORD_LENGTH = 8;
+
 interface JoinScreenProps {
-  /** Si el usuario ya inició sesión pero aún no tiene membresía en ningún grupo */
+  /** Si el usuario ya inició sesión (ej. con Google) pero aún no tiene membresía en ningún grupo */
   signedInEmail?: string | null;
+  /** Nombre prellenado desde el perfil de Google OAuth o perfil existente */
+  initialName?: string | null;
   onAuthCompleted: () => Promise<void>;
 }
 
 export function JoinScreen({
   signedInEmail,
+  initialName,
   onAuthCompleted,
 }: JoinScreenProps): React.JSX.Element {
   const isJoinOnly = Boolean(signedInEmail);
@@ -37,13 +43,39 @@ export function JoinScreen({
   const [email, setEmail] = useState<string>('');
   const [password, setPassword] = useState<string>('');
   const [codigo, setCodigo] = useState<string>('BH-2026');
-  const [nombre, setNombre] = useState<string>('');
+  const [nombre, setNombre] = useState<string>(initialName?.trim() ?? '');
   const [telefono, setTelefono] = useState<string>('+51 ');
   const [direccionLote, setDireccionLote] = useState<string>('');
   const [consentimiento, setConsentimiento] = useState<boolean>(false);
 
   const [submitting, setSubmitting] = useState<boolean>(false);
+  const [googleLoading, setGoogleLoading] = useState<boolean>(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (initialName && !nombre.trim()) {
+      setNombre(initialName.trim());
+    }
+  }, [initialName, nombre]);
+
+  const handleGoogleSignIn = async (): Promise<void> => {
+    setErrorMsg(null);
+    setGoogleLoading(true);
+    try {
+      const result = await signInWithGoogle();
+      if (!result.cancelled) {
+        await onAuthCompleted();
+      }
+    } catch (err) {
+      setErrorMsg(
+        err instanceof Error
+          ? err.message
+          : 'No se pudo iniciar sesión con Google. Intenta nuevamente.'
+      );
+    } finally {
+      setGoogleLoading(false);
+    }
+  };
 
   const handleSubmit = async (): Promise<void> => {
     setErrorMsg(null);
@@ -65,14 +97,14 @@ export function JoinScreen({
       return;
     }
 
-    // Validaciones para registro / unirse por código
+    // Validaciones para registro / completar ingreso a cuadra
     if (!isJoinOnly) {
       if (!email.trim() || !email.includes('@')) {
         setErrorMsg('Ingresa un correo electrónico válido.');
         return;
       }
-      if (password.length < 6) {
-        setErrorMsg('La contraseña debe tener al menos 6 caracteres.');
+      if (password.length < MIN_PASSWORD_LENGTH) {
+        setErrorMsg(`La contraseña debe tener al menos ${MIN_PASSWORD_LENGTH} caracteres.`);
         return;
       }
     }
@@ -102,7 +134,6 @@ export function JoinScreen({
       if (!isJoinOnly) {
         const result = await signUpWithEmail(email, password, nombre);
         if (!result.session) {
-          // Intentar iniciar sesión automáticamente si el proyecto no exige confirmación de correo
           try {
             await signInWithEmail(email, password);
           } catch {
@@ -147,6 +178,8 @@ export function JoinScreen({
     }
   };
 
+  const isBusy = submitting || googleLoading;
+
   return (
     <SafeAreaView style={styles.container}>
       <KeyboardAvoidingView
@@ -156,10 +189,12 @@ export function JoinScreen({
         <ScrollView contentContainerStyle={styles.scrollContent} keyboardShouldPersistTaps="handled">
           <View style={styles.brandHeader}>
             <Text style={styles.brandBadge}>ASOCIACIÓN BELLO HORIZONTE</Text>
-            <Text style={styles.title}>Alarma Vecinal</Text>
+            <Text style={styles.title}>
+              {isJoinOnly ? 'Completar registro a la cuadra' : 'Alarma Vecinal'}
+            </Text>
             <Text style={styles.subtitle}>
               {isJoinOnly
-                ? `Sesión activa (${signedInEmail}). Únete a tu cuadra con el código de invitación.`
+                ? `Sesión iniciada como ${signedInEmail}. Completa tus datos y el código de tu cuadra para solicitar acceso.`
                 : 'Protección comunitaria contra robos en la cuadra (Perú, +51).'}
             </Text>
           </View>
@@ -192,8 +227,27 @@ export function JoinScreen({
           )}
 
           <View style={styles.card}>
+            {/* Botón Continuar con Google disponible tanto en Login como en Registro */}
             {!isJoinOnly && (
               <>
+                <Pressable
+                  style={[styles.googleButton, isBusy && styles.buttonDisabled]}
+                  onPress={handleGoogleSignIn}
+                  disabled={isBusy}
+                >
+                  {googleLoading ? (
+                    <ActivityIndicator color="#111827" />
+                  ) : (
+                    <Text style={styles.googleButtonText}>G  Continuar con Google</Text>
+                  )}
+                </Pressable>
+
+                <View style={styles.dividerRow}>
+                  <View style={styles.dividerLine} />
+                  <Text style={styles.dividerText}>o con correo y contraseña</Text>
+                  <View style={styles.dividerLine} />
+                </View>
+
                 <Text style={styles.label}>Correo electrónico</Text>
                 <TextInput
                   style={styles.input}
@@ -210,7 +264,7 @@ export function JoinScreen({
                   style={styles.input}
                   value={password}
                   onChangeText={setPassword}
-                  placeholder="Mínimo 6 caracteres"
+                  placeholder={`Mínimo ${MIN_PASSWORD_LENGTH} caracteres`}
                   secureTextEntry
                 />
               </>
@@ -279,9 +333,9 @@ export function JoinScreen({
             )}
 
             <Pressable
-              style={[styles.primaryButton, submitting && styles.buttonDisabled]}
+              style={[styles.primaryButton, isBusy && styles.buttonDisabled]}
               onPress={handleSubmit}
-              disabled={submitting}
+              disabled={isBusy}
             >
               {submitting ? (
                 <ActivityIndicator color="#FFFFFF" />
@@ -297,7 +351,7 @@ export function JoinScreen({
             </Pressable>
 
             {isJoinOnly && (
-              <Pressable style={styles.secondaryLink} onPress={handleSignOut}>
+              <Pressable style={styles.secondaryLink} onPress={handleSignOut} disabled={isBusy}>
                 <Text style={styles.secondaryLinkText}>Cerrar sesión</Text>
               </Pressable>
             )}
@@ -335,9 +389,10 @@ const styles = StyleSheet.create({
     borderRadius: 999,
   },
   title: {
-    fontSize: 28,
+    fontSize: 26,
     fontWeight: '900',
     color: '#111827',
+    textAlign: 'center',
   },
   subtitle: {
     fontSize: 13,
@@ -376,6 +431,35 @@ const styles = StyleSheet.create({
     gap: 10,
     borderWidth: 1,
     borderColor: '#E5E7EB',
+  },
+  googleButton: {
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1.5,
+    borderColor: '#D1D5DB',
+    borderRadius: 12,
+    paddingVertical: 13,
+    alignItems: 'center',
+  },
+  googleButtonText: {
+    color: '#111827',
+    fontSize: 15,
+    fontWeight: '800',
+  },
+  dividerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginVertical: 4,
+  },
+  dividerLine: {
+    flex: 1,
+    height: 1,
+    backgroundColor: '#E5E7EB',
+  },
+  dividerText: {
+    fontSize: 12,
+    color: '#6B7280',
+    fontWeight: '600',
   },
   label: {
     fontSize: 13,

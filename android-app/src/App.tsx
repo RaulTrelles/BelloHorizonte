@@ -2,6 +2,8 @@ import type { Session } from '@supabase/supabase-js';
 import React, { useCallback, useEffect, useState } from 'react';
 import {
   ActivityIndicator,
+  Alert,
+  Modal,
   Pressable,
   StatusBar,
   StyleSheet,
@@ -23,10 +25,12 @@ import {
   subscribeAlarmState,
 } from './services/alarmController';
 import {
+  canUseAdminTestControls,
   getCurrentSession,
   getDeviceBrandLabel,
   getMyMembershipWithGroup,
   getMyProfile,
+  signOutUser,
   updateMyFcmToken,
 } from './services/belloHorizonteApi';
 import {
@@ -39,7 +43,29 @@ import { getSupabaseClient, isSupabaseConfigured } from './services/supabaseClie
 import type { ActiveAlarmState } from './types/alarm';
 import type { MembershipWithGroup, ProfileRecord } from './types/database';
 
-type MainTab = 'home' | 'history' | 'permissions' | 'admin';
+type MainTab = 'home' | 'history' | 'admin';
+
+function extractUserDisplayName(session: Session | null, profile: ProfileRecord | null): string {
+  if (profile?.nombre?.trim()) {
+    return profile.nombre.trim();
+  }
+  const meta = session?.user?.user_metadata as Record<string, unknown> | undefined;
+  const candidates = [meta?.full_name, meta?.name, meta?.nombre];
+  for (const c of candidates) {
+    if (typeof c === 'string' && c.trim().length > 0) {
+      return c.trim();
+    }
+  }
+  return '';
+}
+
+function getAuthProviderLabel(session: Session | null): string {
+  const provider = session?.user?.app_metadata?.provider;
+  if (provider === 'google') {
+    return 'Google OAuth';
+  }
+  return 'Correo y contraseña';
+}
 
 export default function App(): React.JSX.Element {
   const [alarmState, setAlarmState] = useState<ActiveAlarmState>(() => getActiveAlarmState());
@@ -49,6 +75,8 @@ export default function App(): React.JSX.Element {
   const [profile, setProfile] = useState<ProfileRecord | null>(null);
   const [membership, setMembership] = useState<MembershipWithGroup | null>(null);
   const [activeTab, setActiveTab] = useState<MainTab>('home');
+  const [showPermissionsScreen, setShowPermissionsScreen] = useState<boolean>(false);
+  const [accountMenuVisible, setAccountMenuVisible] = useState<boolean>(false);
 
   // 1. Motor de alarma crítica (siempre activo independientemente del login)
   useEffect(() => {
@@ -88,6 +116,8 @@ export default function App(): React.JSX.Element {
       if (!current?.user) {
         setProfile(null);
         setMembership(null);
+        setShowPermissionsScreen(false);
+        setAccountMenuVisible(false);
         return;
       }
 
@@ -98,15 +128,15 @@ export default function App(): React.JSX.Element {
 
       setProfile(myProfile);
       setMembership(myMembership);
-      if (myMembership?.rol !== 'admin' && activeTab === 'admin') {
-        setActiveTab('home');
-      }
+      setActiveTab((prev) =>
+        myMembership?.rol !== 'admin' && prev === 'admin' ? 'home' : prev
+      );
     } catch (err) {
       console.warn('[App] Error cargando contexto Supabase:', err);
     } finally {
       setBooting(false);
     }
-  }, [activeTab]);
+  }, []);
 
   useEffect(() => {
     loadUserContext();
@@ -124,6 +154,8 @@ export default function App(): React.JSX.Element {
         setProfile(null);
         setMembership(null);
         setActiveTab('home');
+        setShowPermissionsScreen(false);
+        setAccountMenuVisible(false);
       }
     });
 
@@ -162,6 +194,16 @@ export default function App(): React.JSX.Element {
     };
   }, [session?.user?.id, membership?.estado]);
 
+  const handleSignOutFromMenu = async (): Promise<void> => {
+    setAccountMenuVisible(false);
+    try {
+      await signOutUser();
+      await loadUserContext();
+    } catch (err) {
+      Alert.alert('Error', err instanceof Error ? err.message : 'No se pudo cerrar sesión.');
+    }
+  };
+
   const isPanicActive = alarmState.alert !== null;
 
   // Pantalla roja de alarma SIEMPRE tiene prioridad absoluta sobre cualquier vista
@@ -199,11 +241,14 @@ export default function App(): React.JSX.Element {
       );
     }
 
-    // Pantalla 1: Bienvenida / Unirse (sin sesión o sin membresía)
+    const displayName = extractUserDisplayName(session, profile);
+
+    // Pantalla 1: Bienvenida / Unirse (sin sesión o con sesión Google/correo aún sin membresía)
     if (!session?.user || !membership) {
       return (
         <JoinScreen
           signedInEmail={session?.user?.email ?? null}
+          initialName={displayName || null}
           onAuthCompleted={loadUserContext}
         />
       );
@@ -214,75 +259,161 @@ export default function App(): React.JSX.Element {
       return (
         <PendingApprovalScreen
           membership={membership}
-          userName={profile?.nombre || session.user.email || ''}
+          userName={displayName || session.user.email || ''}
           onRefreshStatus={loadUserContext}
           onSignedOut={loadUserContext}
         />
       );
     }
 
-    const isAdmin = membership.rol === 'admin';
+    const isAdmin = canUseAdminTestControls(membership.rol);
 
     return (
       <SafeAreaView style={styles.mainShell}>
+        {/* Encabezado superior unificado con botón de menú de cuenta */}
+        <View style={styles.topHeader}>
+          <View style={styles.topHeaderInfo}>
+            <Text style={styles.topHeaderTitle} numberOfLines={1}>
+              {membership.group.nombre}
+            </Text>
+            <Text style={styles.topHeaderSub} numberOfLines={1}>
+              {displayName || 'Vecino'} · {membership.rol.toUpperCase()}
+            </Text>
+          </View>
+          <Pressable
+            style={styles.accountMenuTrigger}
+            onPress={() => setAccountMenuVisible(true)}
+          >
+            <Text style={styles.accountMenuTriggerText}>Cuenta ▾</Text>
+          </Pressable>
+        </View>
+
         <View style={styles.screenArea}>
-          {activeTab === 'home' && (
-            <HomeScreen
-              membership={membership}
-              profile={profile}
-              currentUserId={session.user.id}
-              onOpenPermissionsGuide={() => setActiveTab('permissions')}
-              onOpenHistory={() => setActiveTab('history')}
-              onSignedOut={loadUserContext}
+          {showPermissionsScreen ? (
+            <PermissionsGuideScreen
+              isAdmin={isAdmin}
+              onBack={() => setShowPermissionsScreen(false)}
             />
-          )}
-          {activeTab === 'history' && (
-            <HistoryScreen
-              membership={membership}
-              currentUserId={session.user.id}
-            />
-          )}
-          {activeTab === 'permissions' && <PermissionsGuideScreen />}
-          {activeTab === 'admin' && isAdmin && (
-            <AdminScreen
-              membership={membership}
-              currentUserId={session.user.id}
-            />
+          ) : (
+            <>
+              {activeTab === 'home' && (
+                <HomeScreen
+                  membership={membership}
+                  profile={profile}
+                  currentUserId={session.user.id}
+                  onOpenPermissionsGuide={() => setShowPermissionsScreen(true)}
+                  onOpenHistory={() => setActiveTab('history')}
+                  onSignedOut={loadUserContext}
+                />
+              )}
+              {activeTab === 'history' && (
+                <HistoryScreen
+                  membership={membership}
+                  currentUserId={session.user.id}
+                />
+              )}
+              {activeTab === 'admin' && isAdmin && (
+                <AdminScreen
+                  membership={membership}
+                  currentUserId={session.user.id}
+                />
+              )}
+            </>
           )}
         </View>
 
-        {/* Barra de navegación inferior 100% JS/TS (sin módulos nativos extra) */}
+        {/* Barra de navegación inferior limpia: Inicio, Historial y (solo admin) Admin */}
         <View style={styles.tabBar}>
           <TabItem
             label="Inicio"
-            active={activeTab === 'home'}
-            onPress={() => setActiveTab('home')}
+            active={!showPermissionsScreen && activeTab === 'home'}
+            onPress={() => {
+              setShowPermissionsScreen(false);
+              setActiveTab('home');
+            }}
           />
           <TabItem
             label="Historial"
-            active={activeTab === 'history'}
-            onPress={() => setActiveTab('history')}
-          />
-          <TabItem
-            label="Permisos"
-            active={activeTab === 'permissions'}
-            onPress={() => setActiveTab('permissions')}
+            active={!showPermissionsScreen && activeTab === 'history'}
+            onPress={() => {
+              setShowPermissionsScreen(false);
+              setActiveTab('history');
+            }}
           />
           {isAdmin && (
             <TabItem
               label="Admin"
-              active={activeTab === 'admin'}
-              onPress={() => setActiveTab('admin')}
+              active={!showPermissionsScreen && activeTab === 'admin'}
+              onPress={() => {
+                setShowPermissionsScreen(false);
+                setActiveTab('admin');
+              }}
             />
           )}
         </View>
+
+        {/* Menú desplegable / modal unificado de Cuenta y Permisos */}
+        <Modal
+          visible={accountMenuVisible}
+          transparent
+          animationType="fade"
+          onRequestClose={() => setAccountMenuVisible(false)}
+        >
+          <Pressable
+            style={styles.menuBackdrop}
+            onPress={() => setAccountMenuVisible(false)}
+          >
+            <Pressable style={styles.menuCard} onPress={() => {}}>
+              <Text style={styles.menuSectionLabel}>ESTADO DE CUENTA</Text>
+              <View style={styles.accountStatusBox}>
+                <Text style={styles.accountName}>{displayName || 'Vecino'}</Text>
+                <Text style={styles.accountEmail}>{session.user.email || 'Sin correo'}</Text>
+                <View style={styles.accountMetaRow}>
+                  <View style={styles.sessionActivePill}>
+                    <Text style={styles.sessionActiveText}>● Sesión activa</Text>
+                  </View>
+                  <Text style={styles.accountMetaText}>
+                    {membership.rol.toUpperCase()} · {getAuthProviderLabel(session)}
+                  </Text>
+                </View>
+              </View>
+
+              <Pressable
+                style={styles.menuOption}
+                onPress={() => {
+                  setAccountMenuVisible(false);
+                  setShowPermissionsScreen(true);
+                }}
+              >
+                <Text style={styles.menuOptionTitle}>⚙️ Permisos de Alarma</Text>
+                <Text style={styles.menuOptionSub}>
+                  Notificaciones, pantalla completa, batería y guía por marca
+                </Text>
+              </Pressable>
+
+              <Pressable
+                style={[styles.menuOption, styles.menuLogoutOption]}
+                onPress={handleSignOutFromMenu}
+              >
+                <Text style={styles.menuLogoutText}>Cerrar sesión (Desconexión)</Text>
+              </Pressable>
+
+              <Pressable
+                style={styles.menuCloseBtn}
+                onPress={() => setAccountMenuVisible(false)}
+              >
+                <Text style={styles.menuCloseText}>Cerrar menú</Text>
+              </Pressable>
+            </Pressable>
+          </Pressable>
+        </Modal>
       </SafeAreaView>
     );
   };
 
   return (
     <SafeAreaProvider>
-      <StatusBar barStyle="dark-content" backgroundColor="#F3F4F6" />
+      <StatusBar barStyle="dark-content" backgroundColor="#FFFFFF" />
       {renderContent()}
     </SafeAreaProvider>
   );
@@ -307,6 +438,43 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: '#F3F4F6',
   },
+  topHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    backgroundColor: '#FFFFFF',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: '#E5E7EB',
+  },
+  topHeaderInfo: {
+    flex: 1,
+    paddingRight: 10,
+  },
+  topHeaderTitle: {
+    fontSize: 17,
+    fontWeight: '900',
+    color: '#111827',
+  },
+  topHeaderSub: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#4B5563',
+  },
+  accountMenuTrigger: {
+    backgroundColor: '#F3F4F6',
+    borderColor: '#D1D5DB',
+    borderWidth: 1,
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+  },
+  accountMenuTriggerText: {
+    color: '#111827',
+    fontWeight: '800',
+    fontSize: 13,
+  },
   screenArea: {
     flex: 1,
   },
@@ -329,13 +497,109 @@ const styles = StyleSheet.create({
     backgroundColor: '#FEE2E2',
   },
   tabLabel: {
-    fontSize: 12,
+    fontSize: 13,
     fontWeight: '700',
     color: '#4B5563',
   },
   tabLabelActive: {
     color: '#991B1B',
     fontWeight: '900',
+  },
+  menuBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'flex-start',
+    paddingTop: 64,
+    paddingHorizontal: 16,
+  },
+  menuCard: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 18,
+    padding: 18,
+    gap: 12,
+    elevation: 8,
+  },
+  menuSectionLabel: {
+    fontSize: 11,
+    fontWeight: '900',
+    color: '#6B7280',
+    letterSpacing: 1,
+  },
+  accountStatusBox: {
+    backgroundColor: '#F9FAFB',
+    borderRadius: 12,
+    padding: 12,
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+    gap: 4,
+  },
+  accountName: {
+    fontSize: 16,
+    fontWeight: '900',
+    color: '#111827',
+  },
+  accountEmail: {
+    fontSize: 13,
+    color: '#4B5563',
+  },
+  accountMetaRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginTop: 4,
+  },
+  sessionActivePill: {
+    backgroundColor: '#DCFCE7',
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 999,
+  },
+  sessionActiveText: {
+    color: '#166534',
+    fontSize: 11,
+    fontWeight: '800',
+  },
+  accountMetaText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#4B5563',
+  },
+  menuOption: {
+    backgroundColor: '#EFF6FF',
+    borderColor: '#BFDBFE',
+    borderWidth: 1,
+    borderRadius: 12,
+    padding: 12,
+    gap: 2,
+  },
+  menuOptionTitle: {
+    fontSize: 14,
+    fontWeight: '800',
+    color: '#1E3A8A',
+  },
+  menuOptionSub: {
+    fontSize: 12,
+    color: '#3B82F6',
+  },
+  menuLogoutOption: {
+    backgroundColor: '#FEF2F2',
+    borderColor: '#FCA5A5',
+    alignItems: 'center',
+  },
+  menuLogoutText: {
+    fontSize: 14,
+    fontWeight: '800',
+    color: '#991B1B',
+  },
+  menuCloseBtn: {
+    alignItems: 'center',
+    paddingVertical: 6,
+  },
+  menuCloseText: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#6B7280',
   },
   centered: {
     flex: 1,

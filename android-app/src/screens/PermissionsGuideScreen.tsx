@@ -58,7 +58,15 @@ const INITIAL_PERMISSIONS: PermissionStatusMap = {
   dndAccess: false,
 };
 
-export function PermissionsGuideScreen(): React.JSX.Element {
+interface PermissionsGuideScreenProps {
+  isAdmin?: boolean;
+  onBack?: () => void;
+}
+
+export function PermissionsGuideScreen({
+  isAdmin = false,
+  onBack,
+}: PermissionsGuideScreenProps): React.JSX.Element {
   const [permissions, setPermissions] = useState<PermissionStatusMap>(INITIAL_PERMISSIONS);
   const [selectedBrand, setSelectedBrand] = useState<BrandKey>('OPPO');
   const [testingAlarm, setTestingAlarm] = useState<boolean>(false);
@@ -112,6 +120,11 @@ export function PermissionsGuideScreen(): React.JSX.Element {
   return (
     <ScrollView contentContainerStyle={styles.container}>
       <View style={styles.header}>
+        {onBack && (
+          <Pressable style={styles.backButton} onPress={onBack}>
+            <Text style={styles.backButtonText}>← Volver</Text>
+          </Pressable>
+        )}
         <Text style={styles.title}>Permisos Guiados</Text>
         <Text style={styles.subtitle}>
           Configura estos permisos para que la alarma suene fuerte incluso con pantalla bloqueada,
@@ -201,22 +214,24 @@ export function PermissionsGuideScreen(): React.JSX.Element {
         </View>
       </View>
 
-      <View style={styles.card}>
-        <Text style={styles.cardTitle}>3. Verifica tu Altavoz</Text>
-        <Text style={styles.stepText}>
-          Pon tu celular en silencio o volumen bajo y pulsa el botón: la sirena sonará 5 segundos
-          solo en este teléfono y luego restaurará tu volumen anterior.
-        </Text>
-        <Pressable
-          style={[styles.testButton, testingAlarm && styles.testButtonActive]}
-          onPress={handleLocalTest}
-          disabled={testingAlarm}
-        >
-          <Text style={styles.testButtonText}>
-            {testingAlarm ? 'Sonando prueba local (5s)...' : 'Probar alarma local (5s)'}
+      {isAdmin && (
+        <View style={styles.card}>
+          <Text style={styles.cardTitle}>3. Verifica tu Altavoz (Solo Admin)</Text>
+          <Text style={styles.stepText}>
+            Pon tu celular en silencio o volumen bajo y pulsa el botón: la sirena sonará 5 segundos
+            solo en este teléfono y luego restaurará tu volumen anterior.
           </Text>
-        </Pressable>
-      </View>
+          <Pressable
+            style={[styles.testButton, testingAlarm && styles.testButtonActive]}
+            onPress={handleLocalTest}
+            disabled={testingAlarm}
+          >
+            <Text style={styles.testButtonText}>
+              {testingAlarm ? 'Sonando prueba local (5s)...' : 'Probar alarma local (5s)'}
+            </Text>
+          </Pressable>
+        </View>
+      )}
     </ScrollView>
   );
 }
@@ -257,7 +272,20 @@ const styles = StyleSheet.create({
     paddingBottom: 28,
   },
   header: {
-    gap: 4,
+    gap: 6,
+  },
+  backButton: {
+    alignSelf: 'flex-start',
+    backgroundColor: '#E5E7EB',
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    borderRadius: 8,
+    marginBottom: 4,
+  },
+  backButtonText: {
+    color: '#111827',
+    fontWeight: '800',
+    fontSize: 13,
   },
   title: {
     fontSize: 22,
