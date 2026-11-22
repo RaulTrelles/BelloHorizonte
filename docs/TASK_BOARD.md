@@ -26,8 +26,8 @@
 
 | ID | Tarea | Responsable | Estado | Dependencias |
 | :--- | :--- | :--- | :--- | :--- |
-| BH-020 | Crear migraciones SQL Supabase (`profiles`, `groups`, `memberships`, `alerts`, `alert_acks`, `association_info`, `announcements`) + políticas RLS + trigger cooldown 2 min | `database-engineer` | `TODO` | BH-012 + proyecto Supabase |
-| BH-021 | Implementar Edge Functions (`dispatch-panic-alert` y `stop-panic-alert`) + Database Webhooks + limpieza tokens inválidos | `backend-developer` | `TODO` | BH-020 |
+| BH-020 | Crear migraciones SQL Supabase (`profiles`, `groups`, `memberships`, `alerts`, `alert_acks`, `association_info`, `announcements`) + políticas RLS + trigger cooldown 2 min | `database-engineer` | `DONE` | BH-012 + proyecto Supabase |
+| BH-021 | Implementar Edge Functions (`dispatch-panic-alert` y `stop-panic-alert`) + Database Webhooks + limpieza tokens inválidos | `backend-developer` | `DONE` | BH-020 |
 | BH-022 | Implementar 8 pantallas MVP en App Android (Unirse por código + Ley 29733, Pendiente, Principal 2s + semáforo permisos, Confirmación 5s, Alarma roja + 105 + "Estoy enterado" 10s, Historial, Admin 2 admins, Permisos guiados) | `android-developer` | `TODO` | BH-020, BH-021 |
 | BH-023 | Implementar Portal Web en Vercel/Next.js (Info Asociación Bello Horizonte, comunicados, política de privacidad pública Ley 29733 y consola admin) | `frontend-developer` | `TODO` | BH-020 |
 | BH-024 | Añadir botón gratuito "Compartir alerta por WhatsApp" (`wa.me`) y prueba local de alarma en App Android | `android-developer` | `TODO` | BH-022 |
