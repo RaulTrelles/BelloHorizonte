@@ -7,7 +7,8 @@ import {
 } from './alarmController';
 import { uploadMeetingAudioChunk } from './belloHorizonteApi';
 
-export const CHUNK_INTERVAL_MS = 5 * 60 * 1000;
+// Bloques de 25s para que Faster-Whisper CPU en VPS transcriba siempre por debajo del timeout de Edge Functions (150s)
+export const CHUNK_INTERVAL_MS = 25 * 1000;
 const RECORDING_NOTIFICATION_ID = 'bello_horizonte_meeting_recording';
 
 /**

@@ -8,7 +8,7 @@
  */
 
 export const DEFAULT_STT_MODEL = 'Systran/faster-whisper-small';
-export const DEFAULT_STT_TIMEOUT_MS = 120_000;
+export const DEFAULT_STT_TIMEOUT_MS = 145_000;
 export const DEFAULT_DEEPSEEK_URL = 'https://api.deepseek.com/chat/completions';
 export const DEFAULT_DEEPSEEK_MODEL = 'deepseek-chat';
 export const DEFAULT_DEEPSEEK_TIMEOUT_MS = 90_000;
