@@ -8,7 +8,7 @@
 | :--- | :--- | :--- | :--- | :--- |
 | BH-001 | Crear `AGENTS.md`, reglas (`.agents/rules/`), 9 agentes, skills, hooks y workflow | Orquestador | `DONE` | - |
 | BH-002 | Unificar `plan_viabilidad.md` (v3.1) con Portal Web, Supabase y Harness en `docs/` y `.agents/` | `solution-architect` | `DONE` | BH-001 |
-| BH-003 | Inicializar Git + `.gitignore` (protegiendo `.env`, `google-services.json`, `*.jks`, `.agents/logs/`) | `devops-engineer` | `TODO` | Aprobación usuario |
+| BH-003 | Inicializar Git + `.gitignore` (protegiendo `.env`, `google-services.json`, `*.jks`, `.agents/logs/`) | `devops-engineer` | `DONE` | Aprobación usuario |
 
 ---
 
@@ -16,8 +16,8 @@
 
 | ID | Tarea | Responsable | Estado | Dependencias |
 | :--- | :--- | :--- | :--- | :--- |
-| BH-010 | Crear proyecto base React Native + TypeScript (`android-app/`) con Firebase Messaging y Notifee | `android-developer` | `TODO` | BH-003 + datos Firebase |
-| BH-011 | Implementar motor de alarma (`STREAM_ALARM` al máximo, `ForegroundService`, `FullScreenIntent`, `WakeLock`, restauración volumen) | `android-developer` | `TODO` | BH-010 |
+| BH-010 | Crear proyecto base React Native + TypeScript (`android-app/`) con Firebase Messaging y Notifee | `android-developer` | `DONE` | BH-003 + datos Firebase |
+| BH-011 | Implementar motor de alarma (`STREAM_ALARM` al máximo, `ForegroundService`, `FullScreenIntent`, `WakeLock`, restauración volumen) | `android-developer` | `DONE` | BH-010 |
 | BH-012 | Probar entrega FCM `data-only` `high` en 2 teléfonos Android reales (volumen=0, silencio, pantalla bloqueada, app cerrada) | `qa-engineer` | `TODO` | BH-011 |
 
 ---

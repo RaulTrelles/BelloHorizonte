@@ -30,9 +30,7 @@ build/
 coverage/
 .vercel/
 .expo/
-android-app/android/app/build/
-android-app/android/.gradle/
-android-app/android/local.properties
+android-app/android/
 
 # Sistema / IDE
 .DS_Store
