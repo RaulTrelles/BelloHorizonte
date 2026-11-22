@@ -85,6 +85,15 @@ export function Footer() {
               </li>
               <li>
                 <Link
+                  href="/condiciones"
+                  className="inline-flex items-center gap-2 transition hover:text-white"
+                >
+                  <FileText className="h-4 w-4 text-brand-400" aria-hidden="true" />
+                  Condiciones del Servicio
+                </Link>
+              </li>
+              <li>
+                <Link
                   href="/admin"
                   className="inline-flex items-center gap-2 transition hover:text-white"
                 >
