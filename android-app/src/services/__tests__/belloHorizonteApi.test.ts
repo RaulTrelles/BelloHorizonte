@@ -32,8 +32,10 @@ import {
   acknowledgeAlert,
   ADMIN_PROFILES_SAFE_COLUMNS,
   buildInviteWhatsAppText,
+  buildMeetingChunkStoragePath,
   buildPanicAlertWhatsAppText,
   buildWhatsAppShareUrl,
+  canManageMeetings,
   canUseAdminTestControls,
   closePanicAlert,
   CooldownActiveError,
@@ -69,6 +71,18 @@ describe('belloHorizonteApi', () => {
     expect(canUseAdminTestControls('secretario')).toBe(false);
     expect(canUseAdminTestControls(null)).toBe(false);
     expect(canUseAdminTestControls(undefined)).toBe(false);
+  });
+
+  it('permite gestionar y grabar reuniones solo a directiva (admin, presidente, secretario)', () => {
+    expect(canManageMeetings('admin')).toBe(true);
+    expect(canManageMeetings('presidente')).toBe(true);
+    expect(canManageMeetings('secretario')).toBe(true);
+    expect(canManageMeetings('miembro')).toBe(false);
+    expect(canManageMeetings(null)).toBe(false);
+    expect(canManageMeetings(undefined)).toBe(false);
+
+    expect(buildMeetingChunkStoragePath('grp-1', 'mtg-9', 1)).toBe('grp-1/mtg-9/chunk_001.m4a');
+    expect(buildMeetingChunkStoragePath('grp-1', 'mtg-9', 12)).toBe('grp-1/mtg-9/chunk_012.m4a');
   });
 
   it('actualiza fcm_token exclusivamente mediante RPC update_my_fcm_token', async () => {

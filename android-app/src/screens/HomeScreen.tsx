@@ -9,6 +9,7 @@ import {
   ScrollView,
   StyleSheet,
   Text,
+  TextInput,
   View,
 } from 'react-native';
 import {
@@ -19,17 +20,28 @@ import {
 } from '../services/alarmController';
 import {
   buildPanicAlertWhatsAppText,
+  canManageMeetings,
   canUseAdminTestControls,
   closePanicAlert,
+  createMeeting,
   createPanicAlert,
   deleteMyAccount,
+  generateMeetingMinute,
   getAnnouncements,
   getAssociationInfo,
   getGroupAlertsHistory,
   isCooldownError,
   openWhatsAppShare,
   subscribeToGroupAlertsRealtime,
+  updateMeetingStatus,
 } from '../services/belloHorizonteApi';
+import {
+  getMeetingRecorderState,
+  startMeetingRecording,
+  stopMeetingRecording,
+  subscribeMeetingRecorderState,
+  type MeetingRecorderState,
+} from '../services/meetingRecorder';
 import type { PermissionStatusMap } from '../types/alarm';
 import type {
   AlertWithDetails,
@@ -55,7 +67,18 @@ interface HomeScreenProps {
   currentUserId: string;
   onOpenPermissionsGuide: () => void;
   onOpenHistory: () => void;
+  onOpenMeetings: (meetingId?: string) => void;
   onSignedOut: () => Promise<void>;
+}
+
+function formatStopwatch(startedAtMs: number | null, nowMs: number): string {
+  if (!startedAtMs) {
+    return '00:00';
+  }
+  const totalSec = Math.max(0, Math.floor((nowMs - startedAtMs) / 1000));
+  const mins = String(Math.floor(totalSec / 60)).padStart(2, '0');
+  const secs = String(totalSec % 60).padStart(2, '0');
+  return `${mins}:${secs}`;
 }
 
 export function HomeScreen({
@@ -64,6 +87,7 @@ export function HomeScreen({
   currentUserId,
   onOpenPermissionsGuide,
   onOpenHistory,
+  onOpenMeetings,
   onSignedOut,
 }: HomeScreenProps): React.JSX.Element {
   const [permissions, setPermissions] = useState<PermissionStatusMap>(INITIAL_PERMISSIONS);
@@ -89,6 +113,18 @@ export function HomeScreen({
   const [assocInfo, setAssocInfo] = useState<AssociationInfoRecord | null>(null);
   const [announcements, setAnnouncements] = useState<AnnouncementRecord[]>([]);
   const [infoExpanded, setInfoExpanded] = useState<boolean>(false);
+
+  // Grabación de reunión (solo Directiva: admin / presidente / secretario)
+  const [recorderState, setRecorderState] = useState<MeetingRecorderState>(() =>
+    getMeetingRecorderState()
+  );
+  const [recorderClockMs, setRecorderClockMs] = useState<number>(() => Date.now());
+  const [recordModalVisible, setRecordModalVisible] = useState<boolean>(false);
+  const [recordMeetingTitle, setRecordMeetingTitle] = useState<string>(
+    `Reunión ${new Date().toLocaleDateString('es-PE')}`
+  );
+  const [recordConsentChecked, setRecordConsentChecked] = useState<boolean>(false);
+  const [recordBusy, setRecordBusy] = useState<boolean>(false);
 
   const refreshPermissions = useCallback(async () => {
     const status = await checkAllPermissions();
@@ -127,6 +163,7 @@ export function HomeScreen({
     const unsubscribeRealtime = subscribeToGroupAlertsRealtime(membership.group_id, () => {
       refreshAlerts().catch(() => {});
     });
+    const unsubscribeRecorder = subscribeMeetingRecorderState(setRecorderState);
 
     const appStateSub = AppState.addEventListener('change', (nextState) => {
       if (nextState === 'active') {
@@ -137,6 +174,7 @@ export function HomeScreen({
 
     return () => {
       unsubscribeRealtime();
+      unsubscribeRecorder();
       appStateSub.remove();
       if (holdIntervalRef.current) {
         clearInterval(holdIntervalRef.current);
@@ -376,7 +414,84 @@ export function HomeScreen({
     );
   };
 
+  useEffect(() => {
+    if (!recorderState.isRecording) {
+      return;
+    }
+    setRecorderClockMs(Date.now());
+    const interval = setInterval(() => {
+      setRecorderClockMs(Date.now());
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [recorderState.isRecording]);
+
+  const handleStartMeetingRecording = async (): Promise<void> => {
+    if (!recordMeetingTitle.trim()) {
+      Alert.alert('Título requerido', 'Ingresa el título de la reunión antes de grabar.');
+      return;
+    }
+    if (!recordConsentChecked) {
+      Alert.alert(
+        'Consentimiento obligatorio (Ley 29733)',
+        'Debes confirmar que se avisó verbalmente a los presentes que la reunión será grabada para redactar el acta.'
+      );
+      return;
+    }
+    setRecordBusy(true);
+    try {
+      const meeting = await createMeeting({
+        groupId: membership.group_id,
+        userId: currentUserId,
+        titulo: recordMeetingTitle.trim(),
+        estado: 'en_curso',
+      });
+      await startMeetingRecording({
+        groupId: membership.group_id,
+        meetingId: meeting.id,
+        meetingTitle: meeting.titulo,
+        userId: currentUserId,
+      });
+      setRecordModalVisible(false);
+      setRecordConsentChecked(false);
+    } catch (err) {
+      Alert.alert(
+        'No se pudo iniciar grabación',
+        err instanceof Error ? err.message : 'Verifica el permiso de micrófono.'
+      );
+    } finally {
+      setRecordBusy(false);
+    }
+  };
+
+  const handleStopAndGenerateMinute = async (): Promise<void> => {
+    setRecordBusy(true);
+    try {
+      const summary = await stopMeetingRecording();
+      if (summary.meetingId) {
+        await updateMeetingStatus(summary.meetingId, 'finalizada').catch(() => {});
+        try {
+          await generateMeetingMinute(summary.meetingId);
+        } catch (genErr) {
+          console.warn('[HomeScreen] Borrador de acta pendiente:', genErr);
+        }
+        Alert.alert(
+          'Grabación finalizada',
+          `Se procesaron ${summary.chunksUploaded} bloque(s) de audio (${summary.chunksTranscribed} transcritos). Puedes revisar el acta en la pestaña Reuniones.`
+        );
+        onOpenMeetings(summary.meetingId);
+      }
+    } catch (err) {
+      Alert.alert(
+        'Error al detener grabación',
+        err instanceof Error ? err.message : 'Intenta nuevamente.'
+      );
+    } finally {
+      setRecordBusy(false);
+    }
+  };
+
   const isAdmin = canUseAdminTestControls(membership.rol);
+  const canRecordMeetings = canManageMeetings(membership.rol);
   const allCriticalPermissionsOk =
     permissions.notifications &&
     permissions.fullScreenIntent &&
@@ -474,6 +589,51 @@ export function HomeScreen({
             </>
           )}
         </Pressable>
+
+        {/* Botón / Banner de Grabación de Reunión (SOLO Directiva: admin, presidente, secretario) */}
+        {canRecordMeetings &&
+          (recorderState.isRecording ? (
+            <View style={styles.recordingBanner}>
+              <View style={styles.recordingHeaderRow}>
+                <Text style={styles.recordingBadge}>🎙️ GRABANDO REUNIÓN</Text>
+                <Text style={styles.recordingTimer}>
+                  {formatStopwatch(recorderState.startedAtMs, recorderClockMs)}
+                </Text>
+              </View>
+              <Text style={styles.recordingTitle} numberOfLines={1}>
+                {recorderState.meetingTitle || 'Reunión vecinal'}
+              </Text>
+              <Text style={styles.recordingMeta}>
+                Bloque actual #{recorderState.currentChunkIndex} · Subidos:{' '}
+                {recorderState.chunksUploaded} · Transcritos: {recorderState.chunksTranscribed}
+              </Text>
+              <Pressable
+                style={[styles.stopRecordBtn, (recordBusy || recorderState.isStopping) && styles.disabledBtn]}
+                disabled={recordBusy || recorderState.isStopping}
+                onPress={handleStopAndGenerateMinute}
+              >
+                <Text style={styles.stopRecordBtnText}>
+                  {recordBusy || recorderState.isStopping
+                    ? 'Cerrando audio y generando acta...'
+                    : 'Detener y generar acta'}
+                </Text>
+              </Pressable>
+            </View>
+          ) : (
+            <Pressable
+              style={styles.recordMeetingButton}
+              onPress={() => {
+                setRecordMeetingTitle(`Reunión ${new Date().toLocaleDateString('es-PE')}`);
+                setRecordConsentChecked(false);
+                setRecordModalVisible(true);
+              }}
+            >
+              <Text style={styles.recordMeetingButtonText}>🎙️ Grabar reunión</Text>
+              <Text style={styles.recordMeetingSubtext}>
+                Solo directiva · Bloques de 5 min con aviso Ley 29733
+              </Text>
+            </Pressable>
+          ))}
       </View>
 
       {/* Semáforo de Permisos (resumen con acceso directo a Permisos Guiados) */}
@@ -652,6 +812,59 @@ export function HomeScreen({
               <Pressable
                 style={styles.modalCancelButton}
                 onPress={() => setConfirmModalVisible(false)}
+              >
+                <Text style={styles.modalCancelText}>Cancelar</Text>
+              </Pressable>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Modal de Consentimiento Ley 29733 para Grabar Reunión */}
+      <Modal
+        visible={recordModalVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setRecordModalVisible(false)}
+      >
+        <View style={styles.modalBackdrop}>
+          <View style={styles.modalCard}>
+            <Text style={styles.recordModalTitle}>🎙️ Grabar Reunión (Ley 29733)</Text>
+            <Text style={styles.recordModalLabel}>Título de la reunión</Text>
+            <TextInput
+              style={styles.recordTitleInput}
+              value={recordMeetingTitle}
+              onChangeText={setRecordMeetingTitle}
+              placeholder="Ej. Asamblea Vecinal — Noviembre"
+            />
+            <Pressable
+              style={styles.consentRow}
+              onPress={() => setRecordConsentChecked((prev) => !prev)}
+            >
+              <View style={[styles.checkbox, recordConsentChecked && styles.checkboxChecked]}>
+                {recordConsentChecked && <Text style={styles.checkmark}>✓</Text>}
+              </View>
+              <Text style={styles.consentText}>
+                Confirmo que se avisó a los asistentes presentes que esta reunión será grabada
+                únicamente para elaborar el borrador del acta, y que los audios se eliminarán tras
+                su aprobación (Ley 29733).
+              </Text>
+            </Pressable>
+
+            <View style={styles.modalActions}>
+              <Pressable
+                style={[styles.recordConfirmButton, recordBusy && styles.disabledBtn]}
+                disabled={recordBusy}
+                onPress={handleStartMeetingRecording}
+              >
+                <Text style={styles.modalConfirmText}>
+                  {recordBusy ? 'Iniciando micrófono...' : 'Iniciar grabación visible'}
+                </Text>
+              </Pressable>
+              <Pressable
+                style={styles.modalCancelButton}
+                disabled={recordBusy}
+                onPress={() => setRecordModalVisible(false)}
               >
                 <Text style={styles.modalCancelText}>Cancelar</Text>
               </Pressable>
@@ -992,5 +1205,129 @@ const styles = StyleSheet.create({
     color: '#1F2937',
     fontWeight: '800',
     fontSize: 15,
+  },
+  recordMeetingButton: {
+    backgroundColor: '#1E3A8A',
+    borderRadius: 16,
+    paddingVertical: 14,
+    paddingHorizontal: 16,
+    alignItems: 'center',
+    gap: 2,
+  },
+  recordMeetingButtonText: {
+    color: '#FFFFFF',
+    fontSize: 16,
+    fontWeight: '900',
+  },
+  recordMeetingSubtext: {
+    color: '#BFDBFE',
+    fontSize: 11,
+    fontWeight: '600',
+  },
+  recordingBanner: {
+    backgroundColor: '#FFFBEB',
+    borderColor: '#D97706',
+    borderWidth: 2,
+    borderRadius: 16,
+    padding: 14,
+    gap: 8,
+  },
+  recordingHeaderRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  recordingBadge: {
+    color: '#B45309',
+    fontWeight: '900',
+    fontSize: 12,
+    letterSpacing: 0.5,
+  },
+  recordingTimer: {
+    color: '#991B1B',
+    fontWeight: '900',
+    fontSize: 18,
+    fontVariant: ['tabular-nums'],
+  },
+  recordingTitle: {
+    color: '#111827',
+    fontWeight: '800',
+    fontSize: 14,
+  },
+  recordingMeta: {
+    color: '#78350F',
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  stopRecordBtn: {
+    backgroundColor: '#DC2626',
+    borderRadius: 10,
+    paddingVertical: 12,
+    alignItems: 'center',
+  },
+  stopRecordBtnText: {
+    color: '#FFFFFF',
+    fontWeight: '900',
+    fontSize: 14,
+  },
+  disabledBtn: {
+    opacity: 0.6,
+  },
+  recordModalTitle: {
+    fontSize: 19,
+    fontWeight: '900',
+    color: '#1E3A8A',
+    textAlign: 'center',
+  },
+  recordModalLabel: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#374151',
+  },
+  recordTitleInput: {
+    backgroundColor: '#F9FAFB',
+    borderColor: '#D1D5DB',
+    borderWidth: 1,
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    fontSize: 14,
+    color: '#111827',
+  },
+  consentRow: {
+    flexDirection: 'row',
+    gap: 10,
+    alignItems: 'flex-start',
+  },
+  checkbox: {
+    width: 22,
+    height: 22,
+    borderRadius: 6,
+    borderWidth: 2,
+    borderColor: '#9CA3AF',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 2,
+  },
+  checkboxChecked: {
+    backgroundColor: '#1E3A8A',
+    borderColor: '#1E3A8A',
+  },
+  checkmark: {
+    color: '#FFFFFF',
+    fontWeight: '900',
+    fontSize: 14,
+  },
+  consentText: {
+    flex: 1,
+    fontSize: 12,
+    color: '#374151',
+    lineHeight: 17,
+  },
+  recordConfirmButton: {
+    backgroundColor: '#1E3A8A',
+    borderRadius: 12,
+    paddingVertical: 14,
+    alignItems: 'center',
   },
 });

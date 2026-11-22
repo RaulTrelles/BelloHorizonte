@@ -15,6 +15,7 @@ import { AdminScreen } from './screens/AdminScreen';
 import { HistoryScreen } from './screens/HistoryScreen';
 import { HomeScreen } from './screens/HomeScreen';
 import { JoinScreen } from './screens/JoinScreen';
+import { MeetingsScreen } from './screens/MeetingsScreen';
 import { PanicAlertScreen } from './screens/PanicAlertScreen';
 import { PendingApprovalScreen } from './screens/PendingApprovalScreen';
 import { PermissionsGuideScreen } from './screens/PermissionsGuideScreen';
@@ -43,7 +44,7 @@ import { getSupabaseClient, isSupabaseConfigured } from './services/supabaseClie
 import type { ActiveAlarmState } from './types/alarm';
 import type { MembershipWithGroup, ProfileRecord } from './types/database';
 
-type MainTab = 'home' | 'history' | 'admin';
+type MainTab = 'home' | 'meetings' | 'history' | 'admin';
 
 function extractUserDisplayName(session: Session | null, profile: ProfileRecord | null): string {
   if (profile?.nombre?.trim()) {
@@ -75,6 +76,7 @@ export default function App(): React.JSX.Element {
   const [profile, setProfile] = useState<ProfileRecord | null>(null);
   const [membership, setMembership] = useState<MembershipWithGroup | null>(null);
   const [activeTab, setActiveTab] = useState<MainTab>('home');
+  const [selectedMeetingId, setSelectedMeetingId] = useState<string | null>(null);
   const [showPermissionsScreen, setShowPermissionsScreen] = useState<boolean>(false);
   const [accountMenuVisible, setAccountMenuVisible] = useState<boolean>(false);
 
@@ -303,7 +305,21 @@ export default function App(): React.JSX.Element {
                   currentUserId={session.user.id}
                   onOpenPermissionsGuide={() => setShowPermissionsScreen(true)}
                   onOpenHistory={() => setActiveTab('history')}
+                  onOpenMeetings={(meetingId) => {
+                    if (meetingId) {
+                      setSelectedMeetingId(meetingId);
+                    }
+                    setActiveTab('meetings');
+                  }}
                   onSignedOut={loadUserContext}
+                />
+              )}
+              {activeTab === 'meetings' && (
+                <MeetingsScreen
+                  membership={membership}
+                  currentUserId={session.user.id}
+                  initialMeetingId={selectedMeetingId}
+                  onClearInitialMeetingId={() => setSelectedMeetingId(null)}
                 />
               )}
               {activeTab === 'history' && (
@@ -322,7 +338,7 @@ export default function App(): React.JSX.Element {
           )}
         </View>
 
-        {/* Barra de navegación inferior limpia: Inicio, Historial y (solo admin) Admin */}
+        {/* Barra de navegación inferior: Inicio, Reuniones, Historial y (solo admin) Admin */}
         <View style={styles.tabBar}>
           <TabItem
             label="Inicio"
@@ -330,6 +346,14 @@ export default function App(): React.JSX.Element {
             onPress={() => {
               setShowPermissionsScreen(false);
               setActiveTab('home');
+            }}
+          />
+          <TabItem
+            label="Reuniones"
+            active={!showPermissionsScreen && activeTab === 'meetings'}
+            onPress={() => {
+              setShowPermissionsScreen(false);
+              setActiveTab('meetings');
             }}
           />
           <TabItem

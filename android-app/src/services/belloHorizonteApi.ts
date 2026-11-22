@@ -9,21 +9,33 @@ import type {
   AlertWithDetails,
   AnnouncementRecord,
   AssociationInfoRecord,
+  AttendanceResponse,
   BoardMemberItem,
   EmergencyPhoneItem,
   GroupInfo,
   JoinGroupResult,
+  MeetingAttendanceRecord,
+  MeetingDetailsBundle,
+  MeetingRecord,
+  MeetingStatus,
   MemberNameRow,
   MembershipRecord,
   MembershipRole,
   MembershipStatus,
   MembershipWithGroup,
   MembershipWithProfile,
+  MinuteRecord,
+  MinuteSignatureRecord,
+  MinuteSignatureType,
+  MinuteStatus,
   ProfileRecord,
+  RecordingRecord,
+  TranscriptRecord,
 } from '../types/database';
 import { getSupabaseClient } from './supabaseClient';
 
 export const OAUTH_REDIRECT_URI = 'pe.bellohorizonte.alarma://auth-callback';
+export const MEETING_RECORDINGS_BUCKET = 'meeting-recordings';
 
 /**
  * Visibilidad estricta de controles de prueba/simulación de alarma (BH-025):
@@ -31,6 +43,14 @@ export const OAUTH_REDIRECT_URI = 'pe.bellohorizonte.alarma://auth-callback';
  */
 export function canUseAdminTestControls(role: MembershipRole | null | undefined): boolean {
   return role === 'admin';
+}
+
+/**
+ * Permiso para convocar, grabar reuniones y gestionar actas (BH-050 / BH-060 / BH-070):
+ * Directiva autorizada (`admin`, `presidente`, `secretario`).
+ */
+export function canManageMeetings(role: MembershipRole | null | undefined): boolean {
+  return role === 'admin' || role === 'presidente' || role === 'secretario';
 }
 
 // Columnas explícitas para respetar los privilegios de columna (RLS / Ley 29733):
@@ -732,4 +752,375 @@ export function buildInviteWhatsAppText(params: {
 export async function openWhatsAppShare(message: string): Promise<void> {
   const url = buildWhatsAppShareUrl(message);
   await Linking.openURL(url);
+}
+
+// ============================================================================
+// Fases 5–7: Reuniones, Grabación por Bloques y Actas (Ley 29733)
+// ============================================================================
+
+export function buildMeetingChunkStoragePath(
+  groupId: string,
+  meetingId: string,
+  chunkIndex: number
+): string {
+  const padded = String(Math.max(1, Math.floor(chunkIndex))).padStart(3, '0');
+  return `${groupId}/${meetingId}/chunk_${padded}.m4a`;
+}
+
+export async function getGroupMeetings(
+  groupId: string,
+  limit: number = 30
+): Promise<MeetingRecord[]> {
+  const supabase = getSupabaseClient();
+  const { data, error } = await supabase
+    .from('meetings')
+    .select('id, group_id, titulo, fecha, lugar, agenda, estado, created_by, created_at')
+    .eq('group_id', groupId)
+    .order('fecha', { ascending: false })
+    .limit(limit);
+
+  if (error) {
+    throw error;
+  }
+  return (data as MeetingRecord[] | null) ?? [];
+}
+
+export async function createMeeting(params: {
+  groupId: string;
+  userId: string;
+  titulo: string;
+  fecha?: string;
+  lugar?: string;
+  agenda?: string;
+  estado?: MeetingStatus;
+}): Promise<MeetingRecord> {
+  const supabase = getSupabaseClient();
+  const { data, error } = await supabase
+    .from('meetings')
+    .insert({
+      group_id: params.groupId,
+      created_by: params.userId,
+      titulo: params.titulo.trim(),
+      fecha: params.fecha ?? new Date().toISOString(),
+      lugar: params.lugar?.trim() || null,
+      agenda: params.agenda?.trim() || null,
+      estado: params.estado ?? 'programada',
+    })
+    .select('id, group_id, titulo, fecha, lugar, agenda, estado, created_by, created_at')
+    .single();
+
+  if (error) {
+    throw error;
+  }
+  return data as MeetingRecord;
+}
+
+export async function updateMeetingStatus(
+  meetingId: string,
+  estado: MeetingStatus
+): Promise<MeetingRecord> {
+  const supabase = getSupabaseClient();
+  const { data, error } = await supabase
+    .from('meetings')
+    .update({ estado })
+    .eq('id', meetingId)
+    .select('id, group_id, titulo, fecha, lugar, agenda, estado, created_by, created_at')
+    .single();
+
+  if (error) {
+    throw error;
+  }
+  return data as MeetingRecord;
+}
+
+export async function setMyMeetingAttendance(
+  meetingId: string,
+  userId: string,
+  respuesta: AttendanceResponse
+): Promise<MeetingAttendanceRecord> {
+  const supabase = getSupabaseClient();
+  const { data, error } = await supabase
+    .from('meeting_attendance')
+    .upsert(
+      {
+        meeting_id: meetingId,
+        user_id: userId,
+        respuesta,
+        updated_at: new Date().toISOString(),
+      },
+      { onConflict: 'meeting_id,user_id' }
+    )
+    .select('id, meeting_id, user_id, respuesta, asistio, updated_at')
+    .single();
+
+  if (error) {
+    throw error;
+  }
+  return data as MeetingAttendanceRecord;
+}
+
+export async function getMeetingDetails(
+  meetingId: string,
+  groupId: string
+): Promise<MeetingDetailsBundle> {
+  const supabase = getSupabaseClient();
+
+  const [meetingRes, attendanceRes, recordingsRes, minuteRes, namesMap] = await Promise.all([
+    supabase
+      .from('meetings')
+      .select('id, group_id, titulo, fecha, lugar, agenda, estado, created_by, created_at')
+      .eq('id', meetingId)
+      .single(),
+    supabase
+      .from('meeting_attendance')
+      .select('id, meeting_id, user_id, respuesta, asistio, updated_at')
+      .eq('meeting_id', meetingId)
+      .order('updated_at', { ascending: false }),
+    supabase
+      .from('recordings')
+      .select(
+        'id, meeting_id, storage_path, consentimientos, estado, chunk_index, duration_seconds, created_by, created_at'
+      )
+      .eq('meeting_id', meetingId)
+      .order('created_at', { ascending: true }),
+    supabase
+      .from('minutes')
+      .select(
+        'id, meeting_id, contenido, estado, pdf_path, hash_sha256, plazo_observaciones_hasta, aprobada_por, created_at'
+      )
+      .eq('meeting_id', meetingId)
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle(),
+    getGroupMemberNamesMap(groupId).catch(() => new Map<string, string>()),
+  ]);
+
+  if (meetingRes.error) {
+    throw meetingRes.error;
+  }
+  if (attendanceRes.error) {
+    throw attendanceRes.error;
+  }
+  if (recordingsRes.error) {
+    throw recordingsRes.error;
+  }
+  if (minuteRes.error) {
+    throw minuteRes.error;
+  }
+
+  const recordings = (recordingsRes.data as RecordingRecord[] | null) ?? [];
+  const recordingIds = recordings.map((r) => r.id);
+
+  let transcripts: TranscriptRecord[] = [];
+  if (recordingIds.length > 0) {
+    const { data: trData, error: trError } = await supabase
+      .from('transcripts')
+      .select('id, recording_id, texto, proveedor, created_at')
+      .in('recording_id', recordingIds)
+      .order('created_at', { ascending: true });
+    if (trError) {
+      throw trError;
+    }
+    transcripts = (trData as TranscriptRecord[] | null) ?? [];
+  }
+
+  const minute = (minuteRes.data as MinuteRecord | null) ?? null;
+  let signatures: Array<MinuteSignatureRecord & { userName: string }> = [];
+  if (minute) {
+    const { data: sigData, error: sigError } = await supabase
+      .from('minute_signatures')
+      .select('id, minute_id, user_id, tipo, firmado_at, firma_texto, dispositivo_meta')
+      .eq('minute_id', minute.id)
+      .order('firmado_at', { ascending: true });
+    if (sigError) {
+      throw sigError;
+    }
+    signatures = ((sigData as MinuteSignatureRecord[] | null) ?? []).map((sig) => ({
+      ...sig,
+      userName: namesMap.get(sig.user_id) ?? 'Vecino',
+    }));
+  }
+
+  const attendance = ((attendanceRes.data as MeetingAttendanceRecord[] | null) ?? []).map((att) => ({
+    ...att,
+    userName: namesMap.get(att.user_id) ?? 'Vecino',
+  }));
+
+  return {
+    meeting: meetingRes.data as MeetingRecord,
+    attendance,
+    recordings,
+    transcripts,
+    minute,
+    signatures,
+  };
+}
+
+/**
+ * Sube un bloque de audio m4a al bucket privado `meeting-recordings`, registra el consentimiento
+ * Ley 29733 en `recordings` e invoca la Edge Function `transcribe-meeting-chunk`.
+ */
+export async function uploadMeetingAudioChunk(params: {
+  groupId: string;
+  meetingId: string;
+  chunkIndex: number;
+  fileUri: string;
+  durationSeconds?: number;
+  consentimientos: {
+    ley29733_avisado: boolean;
+    confirmado_por_user_id: string;
+    confirmado_at: string;
+    nota?: string;
+  };
+}): Promise<{ recording: RecordingRecord; transcribed: boolean; transcriptionError?: string }> {
+  const supabase = getSupabaseClient();
+  const storagePath = buildMeetingChunkStoragePath(
+    params.groupId,
+    params.meetingId,
+    params.chunkIndex
+  );
+
+  const response = await fetch(params.fileUri);
+  const arrayBuffer = await response.arrayBuffer();
+
+  const { error: uploadError } = await supabase.storage
+    .from(MEETING_RECORDINGS_BUCKET)
+    .upload(storagePath, arrayBuffer, {
+      contentType: 'audio/mp4',
+      upsert: true,
+    });
+
+  if (uploadError) {
+    throw uploadError;
+  }
+
+  const { data: recData, error: recError } = await supabase
+    .from('recordings')
+    .insert({
+      meeting_id: params.meetingId,
+      storage_path: storagePath,
+      consentimientos: params.consentimientos,
+      estado: 'subido',
+      chunk_index: params.chunkIndex,
+      duration_seconds: params.durationSeconds ?? null,
+      created_by: params.consentimientos.confirmado_por_user_id,
+    })
+    .select(
+      'id, meeting_id, storage_path, consentimientos, estado, chunk_index, duration_seconds, created_by, created_at'
+    )
+    .single();
+
+  if (recError) {
+    throw recError;
+  }
+
+  const recording = recData as RecordingRecord;
+
+  // Invocar Edge Function de transcripción con contrato canónico camelCase { recordingId }
+  const { error: fnError } = await supabase.functions.invoke('transcribe-meeting-chunk', {
+    body: {
+      recordingId: recording.id,
+    },
+  });
+
+  if (fnError) {
+    return {
+      recording,
+      transcribed: false,
+      transcriptionError: fnError.message,
+    };
+  }
+
+  return { recording, transcribed: true };
+}
+
+export async function generateMeetingMinute(
+  meetingId: string
+): Promise<{ minute?: MinuteRecord; raw?: unknown }> {
+  const supabase = getSupabaseClient();
+  const { data, error } = await supabase.functions.invoke('generate-meeting-minute', {
+    body: {
+      meetingId,
+      action: 'generate',
+    },
+  });
+
+  if (error) {
+    throw error;
+  }
+
+  const payload = data as { minute?: MinuteRecord } | null;
+  return { minute: payload?.minute, raw: data };
+}
+
+export async function updateMinuteContentAndStatus(
+  minuteId: string,
+  updates: {
+    contenido?: string;
+    estado?: MinuteStatus;
+    aprobadaPor?: string | null;
+  }
+): Promise<MinuteRecord> {
+  const supabase = getSupabaseClient();
+  const patch: Record<string, unknown> = {};
+  if (typeof updates.contenido === 'string') {
+    patch.contenido = updates.contenido;
+  }
+  if (updates.estado) {
+    patch.estado = updates.estado;
+  }
+  if (updates.aprobadaPor !== undefined) {
+    patch.aprobada_por = updates.aprobadaPor;
+  }
+
+  const { data, error } = await supabase
+    .from('minutes')
+    .update(patch)
+    .eq('id', minuteId)
+    .select(
+      'id, meeting_id, contenido, estado, pdf_path, hash_sha256, plazo_observaciones_hasta, aprobada_por, created_at'
+    )
+    .single();
+
+  if (error) {
+    throw error;
+  }
+  return data as MinuteRecord;
+}
+
+export async function purgeMeetingAudio(meetingId: string): Promise<void> {
+  const supabase = getSupabaseClient();
+  const { error } = await supabase.functions.invoke('generate-meeting-minute', {
+    body: {
+      meetingId,
+      action: 'purge_audio',
+    },
+  });
+  if (error) {
+    throw error;
+  }
+}
+
+export async function signMinute(params: {
+  minuteId: string;
+  userId: string;
+  tipo: MinuteSignatureType;
+}): Promise<void> {
+  const supabase = getSupabaseClient();
+  const { error } = await supabase.from('minute_signatures').insert({
+    minute_id: params.minuteId,
+    user_id: params.userId,
+    tipo: params.tipo,
+    dispositivo_meta: {
+      platform: Platform.OS,
+      device_brand: getDeviceBrandLabel(),
+    },
+  });
+
+  if (error) {
+    if (error.code === '23505') {
+      return;
+    }
+    throw error;
+  }
 }

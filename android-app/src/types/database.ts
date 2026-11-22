@@ -119,3 +119,91 @@ export interface AnnouncementRecord {
   published_at: string;
   created_at: string;
 }
+
+// ============================================================================
+// Fases 5–7: Reuniones, Grabación con Consentimiento y Actas (Ley 29733)
+// ============================================================================
+
+export type MeetingStatus = 'programada' | 'en_curso' | 'finalizada' | 'cancelada';
+export type AttendanceResponse = 'asistire' | 'no_asistire' | 'pendiente';
+export type RecordingStatus =
+  | 'grabando'
+  | 'subido'
+  | 'transcribiendo'
+  | 'transcrito'
+  | 'error'
+  | 'eliminado';
+export type MinuteStatus = 'borrador' | 'revision' | 'aprobada' | 'asentada_en_libro';
+export type MinuteSignatureType = 'acuse_recibo' | 'conformidad_simple';
+
+export interface MeetingRecord {
+  id: string;
+  group_id: string;
+  titulo: string;
+  fecha: string;
+  lugar: string | null;
+  agenda: string | null;
+  estado: MeetingStatus;
+  created_by: string | null;
+  created_at: string;
+}
+
+export interface MeetingAttendanceRecord {
+  id: string;
+  meeting_id: string;
+  user_id: string;
+  respuesta: AttendanceResponse;
+  asistio: boolean | null;
+  updated_at: string;
+}
+
+export interface RecordingRecord {
+  id: string;
+  meeting_id: string;
+  storage_path: string | null;
+  consentimientos: Record<string, unknown>;
+  estado: RecordingStatus;
+  chunk_index?: number | null;
+  duration_seconds?: number | null;
+  created_by?: string | null;
+  created_at: string;
+}
+
+export interface TranscriptRecord {
+  id: string;
+  recording_id: string;
+  texto: string;
+  proveedor: string | null;
+  created_at: string;
+}
+
+export interface MinuteRecord {
+  id: string;
+  meeting_id: string;
+  contenido: string;
+  estado: MinuteStatus;
+  pdf_path: string | null;
+  hash_sha256: string | null;
+  plazo_observaciones_hasta: string | null;
+  aprobada_por: string | null;
+  created_at: string;
+}
+
+export interface MinuteSignatureRecord {
+  id: string;
+  minute_id: string;
+  user_id: string;
+  tipo: MinuteSignatureType;
+  firmado_at: string;
+  firma_texto: string | null;
+  dispositivo_meta: Record<string, unknown> | null;
+}
+
+export interface MeetingDetailsBundle {
+  meeting: MeetingRecord;
+  attendance: Array<MeetingAttendanceRecord & { userName: string }>;
+  recordings: RecordingRecord[];
+  transcripts: TranscriptRecord[];
+  minute: MinuteRecord | null;
+  signatures: Array<MinuteSignatureRecord & { userName: string }>;
+}

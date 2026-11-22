@@ -33,6 +33,7 @@ export default ({ config }: ConfigContext): ExpoConfig => {
         'android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK',
         'android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS',
         'android.permission.ACCESS_NOTIFICATION_POLICY',
+        'android.permission.RECORD_AUDIO',
       ],
     },
     plugins,

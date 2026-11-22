@@ -51,6 +51,6 @@
 | :--- | :--- | :--- | :--- | :--- |
 | BH-040 | Fase 3: WhatsApp Cloud API (Meta Business + plantilla Utility) y OTP opcional | `backend-developer` | `TODO` | BH-031 |
 | BH-041 | Fase 4: Prueba cerrada Google Play (12 testers × 14 días), ficha y publicación | `devops-engineer` | `TODO` | BH-031 + Aprobación usuario |
-| BH-050 | Fase 5: Módulo de Reuniones (convocatoria, recordatorios `pg_cron` en canal normal, asistencia) | `backend-developer` + `android-developer` | `TODO` | BH-041 |
-| BH-060 | Fase 6: Actas manuales + PDF imprimible libro legalizado + SHA-256 + conformidades simples | `frontend-developer` + `android-developer` | `TODO` | BH-050 |
-| BH-070 | Fase 7: Grabación con consentimiento/notificación visible + transcripción + borrador IA (Gemini) | `android-developer` + `backend-developer` | `TODO` | BH-060 |
+| BH-050 | Fase 5: Módulo de Reuniones (convocatoria, recordatorios `pg_cron` en canal normal, asistencia) | `backend-developer` + `android-developer` | `DONE` | BH-041 |
+| BH-060 | Fase 6: Actas manuales + PDF imprimible libro legalizado + SHA-256 + conformidades simples | `frontend-developer` + `android-developer` | `DONE` | BH-050 |
+| BH-070 | Fase 7: Grabación con consentimiento/notificación visible + transcripción + borrador IA (Faster-Whisper VPS + DeepSeek-V3) | `android-developer` + `backend-developer` | `DONE` | BH-060 |

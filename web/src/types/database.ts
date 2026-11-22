@@ -102,3 +102,97 @@ export interface GroupMemberName {
   user_id: string;
   nombre: string;
 }
+
+// ============================================================================
+// Entrega B: Reuniones, Grabaciones, Transcripciones y Actas (Fases 5-7)
+// ============================================================================
+
+export type MeetingStatus =
+  | "programada"
+  | "en_curso"
+  | "finalizada"
+  | "cancelada";
+
+export type AttendanceResponse = "asistire" | "no_asistire" | "pendiente";
+
+export type RecordingStatus =
+  | "grabando"
+  | "subido"
+  | "transcribiendo"
+  | "transcrito"
+  | "error"
+  | "eliminado";
+
+export type MinuteStatus =
+  | "borrador"
+  | "revision"
+  | "aprobada"
+  | "asentada_en_libro";
+
+export type MinuteSignatureType = "acuse_recibo" | "conformidad_simple";
+
+export interface MeetingAgreement {
+  acuerdo: string;
+  responsable?: string;
+  plazo?: string;
+}
+
+export interface MeetingRow {
+  id: string;
+  group_id: string;
+  titulo: string;
+  fecha: string;
+  lugar: string | null;
+  agenda: string | null;
+  estado: MeetingStatus;
+  created_by: string | null;
+  created_at: string;
+}
+
+export interface MeetingAttendanceRow {
+  id: string;
+  meeting_id: string;
+  user_id: string;
+  respuesta: AttendanceResponse;
+  asistio: boolean;
+  updated_at: string;
+}
+
+export interface RecordingRow {
+  id: string;
+  meeting_id: string;
+  storage_path: string | null;
+  consentimientos: Record<string, unknown> | unknown[] | null;
+  estado: RecordingStatus;
+  created_at: string;
+}
+
+export interface TranscriptRow {
+  id: string;
+  recording_id: string;
+  texto: string;
+  proveedor: string | null;
+  created_at: string;
+}
+
+export interface MinuteRow {
+  id: string;
+  meeting_id: string;
+  contenido: string;
+  estado: MinuteStatus;
+  pdf_path: string | null;
+  hash_sha256: string | null;
+  plazo_observaciones_hasta: string | null;
+  aprobada_por: string | null;
+  created_at: string;
+}
+
+export interface MinuteSignatureRow {
+  id: string;
+  minute_id: string;
+  user_id: string;
+  tipo: MinuteSignatureType;
+  firmado_at: string;
+  firma_texto: string | null;
+  dispositivo_meta: Record<string, unknown> | null;
+}

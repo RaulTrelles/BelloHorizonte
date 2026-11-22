@@ -7,6 +7,7 @@ import {
   Users,
   Siren,
   Megaphone,
+  CalendarDays,
   LogOut,
   ShieldAlert,
   Loader2,
@@ -22,8 +23,9 @@ import type { GroupRow, MemberRole, MembershipRow } from "@/types/database";
 import { MembersTab } from "@/components/admin/MembersTab";
 import { AlertsTab } from "@/components/admin/AlertsTab";
 import { AnnouncementsTab } from "@/components/admin/AnnouncementsTab";
+import { MeetingsTab } from "@/components/admin/MeetingsTab";
 
-type AdminTab = "miembros" | "alertas" | "comunicados";
+type AdminTab = "miembros" | "alertas" | "comunicados" | "reuniones";
 
 const ALLOWED_ADMIN_ROLES: MemberRole[] = ["admin", "presidente", "secretario"];
 
@@ -251,7 +253,7 @@ export function AdminDashboard() {
   return (
     <div className="mx-auto max-w-6xl px-4 py-8 sm:px-6 lg:px-8">
       {/* Encabezado del Panel */}
-      <div className="mb-6 flex flex-col gap-4 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm sm:flex-row sm:items-center sm:justify-between sm:p-6">
+      <div className="no-print mb-6 flex flex-col gap-4 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm sm:flex-row sm:items-center sm:justify-between sm:p-6">
         <div className="flex items-start gap-3">
           <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-brand-800 text-white">
             <ShieldAlert className="h-6 w-6" aria-hidden="true" />
@@ -300,7 +302,7 @@ export function AdminDashboard() {
 
       {/* Pestañas */}
       <div
-        className="mb-6 flex flex-wrap gap-2 border-b border-slate-200 pb-3"
+        className="no-print mb-6 flex flex-wrap gap-2 border-b border-slate-200 pb-3"
         role="tablist"
         aria-label="Secciones administrativas"
       >
@@ -309,6 +311,11 @@ export function AdminDashboard() {
             { id: "alertas", label: "Alertas (En vivo)", Icon: Siren },
             { id: "miembros", label: "Miembros y Código", Icon: Users },
             { id: "comunicados", label: "Comunicados", Icon: Megaphone },
+            {
+              id: "reuniones",
+              label: "Reuniones y Actas",
+              Icon: CalendarDays,
+            },
           ] as const
         ).map(({ id, label, Icon }) => {
           const active = activeTab === id;
@@ -352,6 +359,15 @@ export function AdminDashboard() {
 
         {activeTab === "comunicados" && (
           <AnnouncementsTab groupId={group.id} currentUserId={userId} />
+        )}
+
+        {activeTab === "reuniones" && (
+          <MeetingsTab
+            groupId={group.id}
+            groupName={group.nombre}
+            currentUserId={userId}
+            currentRole={membership.rol}
+          />
         )}
       </div>
     </div>
