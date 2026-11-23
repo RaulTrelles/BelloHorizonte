@@ -13,19 +13,22 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import {
+  isSyntheticPhoneEmail,
   joinGroupByCode,
+  normalizePeruPhoneDigits,
+  resolveAuthEmail,
   signInWithEmail,
   signInWithGoogle,
   signOutUser,
   signUpWithEmail,
 } from '../services/belloHorizonteApi';
 
-type AuthMode = 'register' | 'login';
+type AuthMode = 'login' | 'join';
 
 const MIN_PASSWORD_LENGTH = 8;
 
 interface JoinScreenProps {
-  /** Si el usuario ya inició sesión (ej. con Google) pero aún no tiene membresía en ningún grupo */
+  /** Si el usuario ya inició sesión (ej. con Google o celular) pero aún no tiene membresía */
   signedInEmail?: string | null;
   /** Nombre prellenado desde el perfil de Google OAuth o perfil existente */
   initialName?: string | null;
@@ -38,9 +41,11 @@ export function JoinScreen({
   onAuthCompleted,
 }: JoinScreenProps): React.JSX.Element {
   const isJoinOnly = Boolean(signedInEmail);
-  const [mode, setMode] = useState<AuthMode>('register');
+  // Pestaña por defecto: "Ya tengo cuenta" (izquierda)
+  const [mode, setMode] = useState<AuthMode>('login');
 
-  const [email, setEmail] = useState<string>('');
+  const [loginIdentifier, setLoginIdentifier] = useState<string>('');
+  const [optionalEmail, setOptionalEmail] = useState<string>('');
   const [password, setPassword] = useState<string>('');
   const [codigo, setCodigo] = useState<string>('BH-2026');
   const [nombre, setNombre] = useState<string>(initialName?.trim() ?? '');
@@ -81,13 +86,13 @@ export function JoinScreen({
     setErrorMsg(null);
 
     if (!isJoinOnly && mode === 'login') {
-      if (!email.trim() || !password) {
-        setErrorMsg('Ingresa tu correo y contraseña.');
+      if (!loginIdentifier.trim() || !password) {
+        setErrorMsg('Ingresa tu correo electrónico o número de celular y tu contraseña.');
         return;
       }
       setSubmitting(true);
       try {
-        await signInWithEmail(email, password);
+        await signInWithEmail(loginIdentifier, password);
         await onAuthCompleted();
       } catch (err) {
         setErrorMsg(err instanceof Error ? err.message : 'No se pudo iniciar sesión.');
@@ -97,18 +102,7 @@ export function JoinScreen({
       return;
     }
 
-    // Validaciones para registro / completar ingreso a cuadra
-    if (!isJoinOnly) {
-      if (!email.trim() || !email.includes('@')) {
-        setErrorMsg('Ingresa un correo electrónico válido.');
-        return;
-      }
-      if (password.length < MIN_PASSWORD_LENGTH) {
-        setErrorMsg(`La contraseña debe tener al menos ${MIN_PASSWORD_LENGTH} caracteres.`);
-        return;
-      }
-    }
-
+    // Validaciones para "Unirme con código" / completar ingreso a cuadra
     if (!codigo.trim()) {
       setErrorMsg('Ingresa el código de invitación de tu cuadra (ej. BH-2026).');
       return;
@@ -117,11 +111,31 @@ export function JoinScreen({
       setErrorMsg('Ingresa tu nombre completo (la autoría es visible en alertas).');
       return;
     }
-    const cleanPhone = telefono.replace(/\s+/g, '');
-    if (cleanPhone.length < 9) {
-      setErrorMsg('Ingresa un número de teléfono válido (Perú +51).');
+
+    let normalizedDigits = '';
+    try {
+      normalizedDigits = normalizePeruPhoneDigits(telefono);
+    } catch (phoneErr) {
+      setErrorMsg(
+        phoneErr instanceof Error
+          ? phoneErr.message
+          : 'Ingresa un número de celular válido (Perú +51).'
+      );
       return;
     }
+
+    const trimmedOptionalEmail = optionalEmail.trim();
+    if (!isJoinOnly) {
+      if (trimmedOptionalEmail && !trimmedOptionalEmail.includes('@')) {
+        setErrorMsg('El correo electrónico ingresado no es válido (o déjalo vacío para entrar con tu celular).');
+        return;
+      }
+      if (password.length < MIN_PASSWORD_LENGTH) {
+        setErrorMsg(`La contraseña debe tener al menos ${MIN_PASSWORD_LENGTH} caracteres.`);
+        return;
+      }
+    }
+
     if (!consentimiento) {
       setErrorMsg(
         'Debes aceptar el consentimiento de protección de datos personales (Ley 29733).'
@@ -132,14 +146,18 @@ export function JoinScreen({
     setSubmitting(true);
     try {
       if (!isJoinOnly) {
-        const result = await signUpWithEmail(email, password, nombre);
+        // Si el vecino dejó vacío el correo, usamos su celular como identificador sintético sin costo SMS
+        const authEmail = resolveAuthEmail(trimmedOptionalEmail || normalizedDigits);
+        const result = await signUpWithEmail(authEmail, password, nombre);
         if (!result.session) {
           try {
-            await signInWithEmail(email, password);
+            await signInWithEmail(authEmail, password);
           } catch {
             Alert.alert(
-              'Confirma tu correo',
-              'Te enviamos un enlace de confirmación a tu correo. Luego inicia sesión e ingresa el código de tu cuadra.'
+              'Confirma tu cuenta',
+              trimmedOptionalEmail
+                ? 'Te enviamos un enlace de confirmación a tu correo. Luego inicia sesión e ingresa el código de tu cuadra.'
+                : 'No se pudo iniciar sesión automáticamente. Verifica tus datos o inicia sesión con tu celular y contraseña.'
             );
             setMode('login');
             setSubmitting(false);
@@ -151,7 +169,7 @@ export function JoinScreen({
       await joinGroupByCode({
         codigo,
         nombre,
-        telefono,
+        telefono: telefono.trim(),
         consentimiento: true,
         direccionLote,
       });
@@ -179,6 +197,10 @@ export function JoinScreen({
   };
 
   const isBusy = submitting || googleLoading;
+  const visibleAccountLabel =
+    signedInEmail && !isSyntheticPhoneEmail(signedInEmail)
+      ? signedInEmail
+      : 'tu cuenta de vecino';
 
   return (
     <SafeAreaView style={styles.container}>
@@ -194,24 +216,13 @@ export function JoinScreen({
             </Text>
             <Text style={styles.subtitle}>
               {isJoinOnly
-                ? `Sesión iniciada como ${signedInEmail}. Completa tus datos y el código de tu cuadra para solicitar acceso.`
+                ? `Sesión iniciada con ${visibleAccountLabel}. Completa tus datos y el código de tu cuadra para solicitar acceso.`
                 : 'Protección comunitaria contra robos en la cuadra (Perú, +51).'}
             </Text>
           </View>
 
           {!isJoinOnly && (
             <View style={styles.modeTabs}>
-              <Pressable
-                style={[styles.modeTab, mode === 'register' && styles.modeTabActive]}
-                onPress={() => {
-                  setMode('register');
-                  setErrorMsg(null);
-                }}
-              >
-                <Text style={[styles.modeTabText, mode === 'register' && styles.modeTabTextActive]}>
-                  Unirme con código
-                </Text>
-              </Pressable>
               <Pressable
                 style={[styles.modeTab, mode === 'login' && styles.modeTabActive]}
                 onPress={() => {
@@ -221,6 +232,17 @@ export function JoinScreen({
               >
                 <Text style={[styles.modeTabText, mode === 'login' && styles.modeTabTextActive]}>
                   Ya tengo cuenta
+                </Text>
+              </Pressable>
+              <Pressable
+                style={[styles.modeTab, mode === 'join' && styles.modeTabActive]}
+                onPress={() => {
+                  setMode('join');
+                  setErrorMsg(null);
+                }}
+              >
+                <Text style={[styles.modeTabText, mode === 'join' && styles.modeTabTextActive]}>
+                  Unirme con código
                 </Text>
               </Pressable>
             </View>
@@ -244,17 +266,22 @@ export function JoinScreen({
 
                 <View style={styles.dividerRow}>
                   <View style={styles.dividerLine} />
-                  <Text style={styles.dividerText}>o con correo y contraseña</Text>
+                  <Text style={styles.dividerText}>o con celular / correo</Text>
                   <View style={styles.dividerLine} />
                 </View>
+              </>
+            )}
 
-                <Text style={styles.label}>Correo electrónico</Text>
+            {/* Campos de Login ("Ya tengo cuenta") */}
+            {!isJoinOnly && mode === 'login' && (
+              <>
+                <Text style={styles.label}>Correo electrónico o celular</Text>
                 <TextInput
                   style={styles.input}
-                  value={email}
-                  onChangeText={setEmail}
-                  placeholder="vecino@correo.com"
-                  keyboardType="email-address"
+                  value={loginIdentifier}
+                  onChangeText={setLoginIdentifier}
+                  placeholder="vecino@correo.com o 987654321"
+                  keyboardType="default"
                   autoCapitalize="none"
                   autoCorrect={false}
                 />
@@ -270,7 +297,8 @@ export function JoinScreen({
               </>
             )}
 
-            {(isJoinOnly || mode === 'register') && (
+            {/* Campos de Registro ("Unirme con código" o completar registro tras Google) */}
+            {(isJoinOnly || mode === 'join') && (
               <>
                 <Text style={styles.label}>Código de invitación de cuadra</Text>
                 <TextInput
@@ -291,14 +319,40 @@ export function JoinScreen({
                   autoCapitalize="words"
                 />
 
-                <Text style={styles.label}>Teléfono celular (Perú +51)</Text>
+                <Text style={styles.label}>Teléfono celular (Perú +51 — obligatorio)</Text>
                 <TextInput
                   style={styles.input}
                   value={telefono}
                   onChangeText={setTelefono}
-                  placeholder="+51 999 888 777"
+                  placeholder="+51 987 654 321"
                   keyboardType="phone-pad"
                 />
+
+                {!isJoinOnly && (
+                  <>
+                    <Text style={styles.label}>
+                      Correo electrónico (opcional — si no tienes, entrarás con tu celular)
+                    </Text>
+                    <TextInput
+                      style={styles.input}
+                      value={optionalEmail}
+                      onChangeText={setOptionalEmail}
+                      placeholder="vecino@correo.com (opcional)"
+                      keyboardType="email-address"
+                      autoCapitalize="none"
+                      autoCorrect={false}
+                    />
+
+                    <Text style={styles.label}>Contraseña</Text>
+                    <TextInput
+                      style={styles.input}
+                      value={password}
+                      onChangeText={setPassword}
+                      placeholder={`Mínimo ${MIN_PASSWORD_LENGTH} caracteres`}
+                      secureTextEntry
+                    />
+                  </>
+                )}
 
                 <Text style={styles.label}>Manzana / Lote o Casa (opcional)</Text>
                 <TextInput

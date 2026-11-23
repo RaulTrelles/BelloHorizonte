@@ -31,6 +31,7 @@ import {
   getDeviceBrandLabel,
   getMyMembershipWithGroup,
   getMyProfile,
+  isSyntheticPhoneEmail,
   signOutUser,
   updateMyFcmToken,
 } from './services/belloHorizonteApi';
@@ -65,7 +66,18 @@ function getAuthProviderLabel(session: Session | null): string {
   if (provider === 'google') {
     return 'Google OAuth';
   }
+  if (isSyntheticPhoneEmail(session?.user?.email)) {
+    return 'Celular y contraseña';
+  }
   return 'Correo y contraseña';
+}
+
+function getAccountContactLabel(session: Session | null, profile: ProfileRecord | null): string {
+  const email = session?.user?.email;
+  if (isSyntheticPhoneEmail(email)) {
+    return profile?.telefono?.trim() || 'Celular registrado';
+  }
+  return email || profile?.telefono?.trim() || 'Sin correo';
 }
 
 export default function App(): React.JSX.Element {
@@ -303,7 +315,6 @@ export default function App(): React.JSX.Element {
                   membership={membership}
                   profile={profile}
                   currentUserId={session.user.id}
-                  onOpenPermissionsGuide={() => setShowPermissionsScreen(true)}
                   onOpenHistory={() => setActiveTab('history')}
                   onOpenMeetings={(meetingId) => {
                     if (meetingId) {
@@ -391,7 +402,9 @@ export default function App(): React.JSX.Element {
               <Text style={styles.menuSectionLabel}>ESTADO DE CUENTA</Text>
               <View style={styles.accountStatusBox}>
                 <Text style={styles.accountName}>{displayName || 'Vecino'}</Text>
-                <Text style={styles.accountEmail}>{session.user.email || 'Sin correo'}</Text>
+                <Text style={styles.accountEmail}>
+                  {getAccountContactLabel(session, profile)}
+                </Text>
                 <View style={styles.accountMetaRow}>
                   <View style={styles.sessionActivePill}>
                     <Text style={styles.sessionActiveText}>● Sesión activa</Text>

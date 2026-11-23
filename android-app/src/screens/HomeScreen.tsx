@@ -13,7 +13,6 @@ import {
   View,
 } from 'react-native';
 import {
-  checkAllPermissions,
   isNativeAlarmAvailable,
   triggerLocalTestAlarm,
   triggerPanicAlarm,
@@ -42,7 +41,6 @@ import {
   subscribeMeetingRecorderState,
   type MeetingRecorderState,
 } from '../services/meetingRecorder';
-import type { PermissionStatusMap } from '../types/alarm';
 import type {
   AlertWithDetails,
   AnnouncementRecord,
@@ -54,18 +52,10 @@ import type {
 const HOLD_DURATION_MS = 2_000;
 const CONFIRM_COUNTDOWN_SECONDS = 5;
 
-const INITIAL_PERMISSIONS: PermissionStatusMap = {
-  notifications: false,
-  fullScreenIntent: false,
-  batteryOptimizationIgnored: false,
-  dndAccess: false,
-};
-
 interface HomeScreenProps {
   membership: MembershipWithGroup;
   profile: ProfileRecord | null;
   currentUserId: string;
-  onOpenPermissionsGuide: () => void;
   onOpenHistory: () => void;
   onOpenMeetings: (meetingId?: string) => void;
   onSignedOut: () => Promise<void>;
@@ -85,12 +75,10 @@ export function HomeScreen({
   membership,
   profile,
   currentUserId,
-  onOpenPermissionsGuide,
   onOpenHistory,
   onOpenMeetings,
   onSignedOut,
 }: HomeScreenProps): React.JSX.Element {
-  const [permissions, setPermissions] = useState<PermissionStatusMap>(INITIAL_PERMISSIONS);
   const [testingLocalAlarm, setTestingLocalAlarm] = useState<boolean>(false);
 
   // Botón grande ALERTA (mantener 2s)
@@ -126,11 +114,6 @@ export function HomeScreen({
   const [recordConsentChecked, setRecordConsentChecked] = useState<boolean>(false);
   const [recordBusy, setRecordBusy] = useState<boolean>(false);
 
-  const refreshPermissions = useCallback(async () => {
-    const status = await checkAllPermissions();
-    setPermissions(status);
-  }, []);
-
   const refreshAlerts = useCallback(async () => {
     try {
       const list = await getGroupAlertsHistory(membership.group_id, 5);
@@ -156,7 +139,6 @@ export function HomeScreen({
   }, [membership.group_id]);
 
   useEffect(() => {
-    refreshPermissions();
     refreshAlerts();
     refreshPortalData();
 
@@ -167,7 +149,6 @@ export function HomeScreen({
 
     const appStateSub = AppState.addEventListener('change', (nextState) => {
       if (nextState === 'active') {
-        refreshPermissions();
         refreshAlerts().catch(() => {});
       }
     });
@@ -185,7 +166,7 @@ export function HomeScreen({
         testAlarmTimeoutRef.current = null;
       }
     };
-  }, [membership.group_id, refreshAlerts, refreshPermissions, refreshPortalData]);
+  }, [membership.group_id, refreshAlerts, refreshPortalData]);
 
   const handleConfirmPanicDispatch = useCallback(async (): Promise<void> => {
     if (confirmDispatchedRef.current) {
@@ -492,10 +473,6 @@ export function HomeScreen({
 
   const isAdmin = canUseAdminTestControls(membership.rol);
   const canRecordMeetings = canManageMeetings(membership.rol);
-  const allCriticalPermissionsOk =
-    permissions.notifications &&
-    permissions.fullScreenIntent &&
-    permissions.batteryOptimizationIgnored;
 
   const activeEnterados = activeAlert
     ? activeAlert.acks.filter((a) => a.tipo_ack === 'enterado')
@@ -635,29 +612,6 @@ export function HomeScreen({
             </Pressable>
           ))}
       </View>
-
-      {/* Semáforo de Permisos (resumen con acceso directo a Permisos Guiados) */}
-      <Pressable style={styles.card} onPress={onOpenPermissionsGuide}>
-        <View style={styles.cardHeaderRow}>
-          <View style={styles.trafficLightHeader}>
-            <View
-              style={[
-                styles.statusDotLarge,
-                allCriticalPermissionsOk ? styles.dotGreen : styles.dotRed,
-              ]}
-            />
-            <Text style={styles.cardTitle}>
-              {allCriticalPermissionsOk ? 'Permisos de Alarma: OK' : 'Permisos Incompletos'}
-            </Text>
-          </View>
-          <Text style={styles.smallLinkText}>Configurar →</Text>
-        </View>
-        <Text style={styles.helperText}>
-          {allCriticalPermissionsOk
-            ? 'Notificaciones, pantalla completa y batería listos para recibir sirena fuerte.'
-            : 'Toca aquí para activar los permisos guiados por marca (OPPO, Samsung, Xiaomi, etc.).'}
-        </Text>
-      </Pressable>
 
       {/* Último evento */}
       <Pressable style={styles.card} onPress={onOpenHistory}>

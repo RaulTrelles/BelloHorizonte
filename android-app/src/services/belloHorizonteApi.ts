@@ -38,6 +38,50 @@ import { getSupabaseClient } from './supabaseClient';
 export const OAUTH_REDIRECT_URI = 'pe.bellohorizonte.alarma://auth-callback';
 export const MEETING_RECORDINGS_BUCKET = 'meeting-recordings';
 export const MEETING_MINUTES_PDF_BUCKET = 'meeting-minutes-pdf';
+export const SYNTHETIC_PHONE_EMAIL_DOMAIN = '@vecino.bellohorizonte.pe';
+
+/**
+ * Normaliza un número de celular de Perú (o internacional) a solo dígitos:
+ * - Limpia espacios, guiones y '+'
+ * - Si tiene 9 dígitos iniciando en 9 (ej. 987654321), antepone '51' -> '51987654321'
+ * - Valida que el resultado tenga entre 9 y 15 dígitos (Perú: 11 dígitos 519XXXXXXXX)
+ */
+export function normalizePeruPhoneDigits(input: string): string {
+  const digits = input.replace(/\D/g, '');
+  const normalized = /^9\d{8}$/.test(digits) ? `51${digits}` : digits;
+
+  if (!/^\d{9,15}$/.test(normalized)) {
+    throw new Error(
+      'Número de celular inválido. Ingresa 9 dígitos (ej. 987654321) o con código +51.'
+    );
+  }
+  return normalized;
+}
+
+/**
+ * Resuelve el identificador de autenticación (correo real o celular -> correo sintético interno).
+ */
+export function resolveAuthEmail(emailOrPhone: string): string {
+  const trimmed = emailOrPhone.trim();
+  if (!trimmed) {
+    throw new Error('Ingresa tu correo electrónico o número de celular.');
+  }
+  if (trimmed.includes('@')) {
+    return trimmed.toLowerCase();
+  }
+  const phoneDigits = normalizePeruPhoneDigits(trimmed);
+  return `${phoneDigits}${SYNTHETIC_PHONE_EMAIL_DOMAIN}`;
+}
+
+/**
+ * Detecta si un correo corresponde a un identificador sintético generado desde celular.
+ */
+export function isSyntheticPhoneEmail(email?: string | null): boolean {
+  if (!email) {
+    return false;
+  }
+  return email.trim().toLowerCase().endsWith(SYNTHETIC_PHONE_EMAIL_DOMAIN);
+}
 
 const MINUTES_SELECT_COLUMNS =
   'id, meeting_id, contenido, estado, pdf_path, hash_sha256, plazo_observaciones_hasta, aprobada_por, aprobada_presidente_por, aprobada_presidente_at, aprobada_secretario_por, aprobada_secretario_at, created_at';
@@ -110,10 +154,11 @@ export async function getCurrentSession(): Promise<Session | null> {
   return data.session;
 }
 
-export async function signInWithEmail(email: string, password: string): Promise<Session> {
+export async function signInWithEmail(emailOrPhone: string, password: string): Promise<Session> {
   const supabase = getSupabaseClient();
+  const resolvedEmail = resolveAuthEmail(emailOrPhone);
   const { data, error } = await supabase.auth.signInWithPassword({
-    email: email.trim().toLowerCase(),
+    email: resolvedEmail,
     password,
   });
   if (error) {
@@ -125,14 +170,17 @@ export async function signInWithEmail(email: string, password: string): Promise<
   return data.session;
 }
 
+export const signInWithEmailOrPhone = signInWithEmail;
+
 export async function signUpWithEmail(
-  email: string,
+  emailOrPhone: string,
   password: string,
   nombre: string
 ): Promise<{ session: Session | null; user: User | null }> {
   const supabase = getSupabaseClient();
+  const resolvedEmail = resolveAuthEmail(emailOrPhone);
   const { data, error } = await supabase.auth.signUp({
-    email: email.trim().toLowerCase(),
+    email: resolvedEmail,
     password,
     options: {
       data: {

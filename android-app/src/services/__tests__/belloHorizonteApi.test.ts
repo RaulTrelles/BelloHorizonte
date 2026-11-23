@@ -53,9 +53,12 @@ import {
   GROUPS_SAFE_COLUMNS,
   isCooldownError,
   isMinuteFullyApproved,
+  isSyntheticPhoneEmail,
+  normalizePeruPhoneDigits,
   OAUTH_REDIRECT_URI,
   PROFILES_SAFE_COLUMNS,
   regenerateGroupInviteCode,
+  resolveAuthEmail,
   signInWithGoogle,
   updateMyFcmToken,
 } from '../belloHorizonteApi';
@@ -323,5 +326,21 @@ describe('belloHorizonteApi', () => {
       },
     });
     expect(pdfRes.whatsappShareUrl).toBe('https://wa.me/?text=Acta%20lista');
+  });
+
+  it('normaliza celulares de Perú y resuelve correos sintéticos sin SMS', () => {
+    expect(normalizePeruPhoneDigits('987654321')).toBe('51987654321');
+    expect(normalizePeruPhoneDigits('+51 987 654 321')).toBe('51987654321');
+    expect(normalizePeruPhoneDigits('+51 987-654-321')).toBe('51987654321');
+    expect(() => normalizePeruPhoneDigits('12345')).toThrow();
+
+    expect(resolveAuthEmail('Vecino@Correo.com ')).toBe('vecino@correo.com');
+    expect(resolveAuthEmail('987654321')).toBe('51987654321@vecino.bellohorizonte.pe');
+    expect(resolveAuthEmail('+51 987 654 321')).toBe('51987654321@vecino.bellohorizonte.pe');
+
+    expect(isSyntheticPhoneEmail('51987654321@vecino.bellohorizonte.pe')).toBe(true);
+    expect(isSyntheticPhoneEmail('vecino@gmail.com')).toBe(false);
+    expect(isSyntheticPhoneEmail(null)).toBe(false);
+    expect(isSyntheticPhoneEmail(undefined)).toBe(false);
   });
 });
