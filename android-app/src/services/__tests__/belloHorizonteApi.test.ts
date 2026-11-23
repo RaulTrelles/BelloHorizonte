@@ -335,9 +335,10 @@ describe('belloHorizonteApi', () => {
     expect(() => normalizePeruPhoneDigits('12345')).toThrow();
 
     expect(resolveAuthEmail('Vecino@Correo.com ')).toBe('vecino@correo.com');
-    expect(resolveAuthEmail('987654321')).toBe('51987654321@vecino.bellohorizonte.pe');
-    expect(resolveAuthEmail('+51 987 654 321')).toBe('51987654321@vecino.bellohorizonte.pe');
+    expect(resolveAuthEmail('987654321')).toBe('cel.51987654321@bellohorizonte.vercel.app');
+    expect(resolveAuthEmail('+51 987 654 321')).toBe('cel.51987654321@bellohorizonte.vercel.app');
 
+    expect(isSyntheticPhoneEmail('cel.51987654321@bellohorizonte.vercel.app')).toBe(true);
     expect(isSyntheticPhoneEmail('51987654321@vecino.bellohorizonte.pe')).toBe(true);
     expect(isSyntheticPhoneEmail('vecino@gmail.com')).toBe(false);
     expect(isSyntheticPhoneEmail(null)).toBe(false);

@@ -38,7 +38,8 @@ import { getSupabaseClient } from './supabaseClient';
 export const OAUTH_REDIRECT_URI = 'pe.bellohorizonte.alarma://auth-callback';
 export const MEETING_RECORDINGS_BUCKET = 'meeting-recordings';
 export const MEETING_MINUTES_PDF_BUCKET = 'meeting-minutes-pdf';
-export const SYNTHETIC_PHONE_EMAIL_DOMAIN = '@vecino.bellohorizonte.pe';
+export const SYNTHETIC_PHONE_EMAIL_DOMAIN = '@bellohorizonte.vercel.app';
+export const SYNTHETIC_PHONE_EMAIL_PREFIX = 'cel.';
 
 /**
  * Normaliza un número de celular de Perú (o internacional) a solo dígitos:
@@ -59,7 +60,8 @@ export function normalizePeruPhoneDigits(input: string): string {
 }
 
 /**
- * Resuelve el identificador de autenticación (correo real o celular -> correo sintético interno).
+ * Resuelve el identificador de autenticación (correo real o celular -> correo sintético interno
+ * sobre dominio real con DNS activo para compatibilidad con validación de Supabase Auth).
  */
 export function resolveAuthEmail(emailOrPhone: string): string {
   const trimmed = emailOrPhone.trim();
@@ -70,7 +72,7 @@ export function resolveAuthEmail(emailOrPhone: string): string {
     return trimmed.toLowerCase();
   }
   const phoneDigits = normalizePeruPhoneDigits(trimmed);
-  return `${phoneDigits}${SYNTHETIC_PHONE_EMAIL_DOMAIN}`;
+  return `${SYNTHETIC_PHONE_EMAIL_PREFIX}${phoneDigits}${SYNTHETIC_PHONE_EMAIL_DOMAIN}`;
 }
 
 /**
@@ -80,7 +82,12 @@ export function isSyntheticPhoneEmail(email?: string | null): boolean {
   if (!email) {
     return false;
   }
-  return email.trim().toLowerCase().endsWith(SYNTHETIC_PHONE_EMAIL_DOMAIN);
+  const normalized = email.trim().toLowerCase();
+  return (
+    (normalized.startsWith(SYNTHETIC_PHONE_EMAIL_PREFIX) &&
+      normalized.endsWith(SYNTHETIC_PHONE_EMAIL_DOMAIN)) ||
+    normalized.endsWith('@vecino.bellohorizonte.pe')
+  );
 }
 
 const MINUTES_SELECT_COLUMNS =
