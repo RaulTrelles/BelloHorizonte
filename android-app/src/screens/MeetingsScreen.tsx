@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
+  Linking,
   Modal,
   Pressable,
   RefreshControl,
@@ -13,10 +14,14 @@ import {
 } from 'react-native';
 import {
   canManageMeetings,
+  confirmMinuteByRole,
   createMeeting,
   generateMeetingMinute,
+  generateOfficialMinutePdf,
   getGroupMeetings,
   getMeetingDetails,
+  getPublicMinutePdfUrl,
+  isMinuteFullyApproved,
   purgeMeetingAudio,
   setMyMeetingAttendance,
   signMinute,
@@ -29,6 +34,7 @@ import type {
   MeetingRecord,
   MembershipWithGroup,
   MinuteStatus,
+  OfficialMinutePdfResult,
   RecordingStatus,
 } from '../types/database';
 
@@ -120,6 +126,7 @@ export function MeetingsScreen({
   // Edición de acta (solo directiva)
   const [editingMinute, setEditingMinute] = useState<boolean>(false);
   const [minuteDraftText, setMinuteDraftText] = useState<string>('');
+  const [latestPdfResult, setLatestPdfResult] = useState<OfficialMinutePdfResult | null>(null);
 
   // Modal crear reunión (solo directiva)
   const [createModalVisible, setCreateModalVisible] = useState<boolean>(false);
@@ -180,10 +187,12 @@ export function MeetingsScreen({
 
   useEffect(() => {
     if (selectedMeetingId) {
+      setLatestPdfResult(null);
       loadDetails(selectedMeetingId);
     } else {
       setDetails(null);
       setEditingMinute(false);
+      setLatestPdfResult(null);
     }
   }, [loadDetails, selectedMeetingId]);
 
@@ -269,6 +278,7 @@ export function MeetingsScreen({
             : undefined,
       });
       setEditingMinute(false);
+      setLatestPdfResult(null);
       await loadDetails(details.meeting.id);
     } catch (err) {
       Alert.alert('Error', err instanceof Error ? err.message : 'No se pudo actualizar el acta.');
@@ -307,6 +317,69 @@ export function MeetingsScreen({
         },
       ]
     );
+  };
+
+  const handleConfirmMinuteByRole = async (
+    asRole: 'presidente' | 'secretario'
+  ): Promise<void> => {
+    if (!details?.minute) {
+      return;
+    }
+    setBusyAction(true);
+    try {
+      await confirmMinuteByRole(details.minute.id, asRole);
+      await loadDetails(details.meeting.id);
+      Alert.alert(
+        'Confirmación registrada',
+        asRole === 'presidente'
+          ? 'Se registró la confirmación directiva del Presidente.'
+          : 'Se registró la confirmación directiva de Secretaría.'
+      );
+    } catch (err) {
+      Alert.alert(
+        'Error',
+        err instanceof Error ? err.message : 'No se pudo registrar la confirmación.'
+      );
+    } finally {
+      setBusyAction(false);
+    }
+  };
+
+  const handleOpenExternalUrl = async (url: string, fallbackMessage: string): Promise<void> => {
+    if (!/^https?:\/\//i.test(url.trim())) {
+      Alert.alert('Enlace no disponible', fallbackMessage);
+      return;
+    }
+    try {
+      await Linking.openURL(url.trim());
+    } catch {
+      Alert.alert('Error', fallbackMessage);
+    }
+  };
+
+  const handleGeneratePdfAndShare = async (): Promise<void> => {
+    if (!details?.minute || !isMinuteFullyApproved(details.minute)) {
+      return;
+    }
+    setBusyAction(true);
+    try {
+      const result = await generateOfficialMinutePdf(details.meeting.id);
+      setLatestPdfResult(result);
+      await loadDetails(details.meeting.id);
+      if (result.whatsappShareUrl) {
+        await handleOpenExternalUrl(
+          result.whatsappShareUrl,
+          'El PDF se generó correctamente, pero no se pudo abrir WhatsApp automáticamente.'
+        );
+      }
+    } catch (err) {
+      Alert.alert(
+        'Error generando PDF oficial',
+        err instanceof Error ? err.message : 'No se pudo generar el PDF oficial del acta.'
+      );
+    } finally {
+      setBusyAction(false);
+    }
   };
 
   const handleSignMinute = async (
@@ -538,6 +611,88 @@ export function MeetingsScreen({
 
                   {isBoard && !editingMinute && (
                     <View style={styles.stackGap}>
+                      {/* Doble Confirmación Directiva (Presidente + Secretaría) */}
+                      <View style={styles.dualApprovalBox}>
+                        <Text style={styles.subTitle}>Doble Confirmación Directiva</Text>
+                        <Text style={styles.metaText}>
+                          • Presidente:{' '}
+                          {minute.aprobada_presidente_at
+                            ? `✅ Confirmado por ${
+                                details.presidentApproverName || 'Presidente'
+                              } (${formatDateTime(minute.aprobada_presidente_at)})`
+                            : '⏳ Pendiente de confirmación'}
+                        </Text>
+                        <Text style={styles.metaText}>
+                          • Secretaría:{' '}
+                          {minute.aprobada_secretario_at
+                            ? `✅ Confirmado por ${
+                                details.secretaryApproverName || 'Secretaría'
+                              } (${formatDateTime(minute.aprobada_secretario_at)})`
+                            : '⏳ Pendiente de confirmación'}
+                        </Text>
+                        <Text style={styles.warningNote}>
+                          Nota: Editar el texto del acta reinicia ambas confirmaciones directivas.
+                        </Text>
+
+                        <View style={styles.rowGap}>
+                          {(membership.rol === 'presidente' || membership.rol === 'admin') &&
+                            !minute.aprobada_presidente_at && (
+                              <Pressable
+                                style={[styles.approveBtnFlex, busyAction && styles.disabled]}
+                                disabled={busyAction}
+                                onPress={() => handleConfirmMinuteByRole('presidente')}
+                              >
+                                <Text style={styles.primaryBtnText}>
+                                  Confirmar como Presidente
+                                </Text>
+                              </Pressable>
+                            )}
+                          {(membership.rol === 'secretario' || membership.rol === 'admin') &&
+                            !minute.aprobada_secretario_at && (
+                              <Pressable
+                                style={[styles.primaryBtnFlex, busyAction && styles.disabled]}
+                                disabled={busyAction}
+                                onPress={() => handleConfirmMinuteByRole('secretario')}
+                              >
+                                <Text style={styles.primaryBtnText}>
+                                  Confirmar como Secretario/a
+                                </Text>
+                              </Pressable>
+                            )}
+                        </View>
+                      </View>
+
+                      {/* Generar PDF oficial y difundir por WhatsApp (solo si ambos confirmaron) */}
+                      <Pressable
+                        style={[
+                          styles.whatsappPdfBtn,
+                          (!isMinuteFullyApproved(minute) || busyAction) && styles.disabled,
+                        ]}
+                        disabled={!isMinuteFullyApproved(minute) || busyAction}
+                        onPress={handleGeneratePdfAndShare}
+                      >
+                        <Text style={styles.primaryBtnText}>
+                          📄 Generar PDF y difundir por WhatsApp
+                        </Text>
+                      </Pressable>
+
+                      {(latestPdfResult?.pdfUrl || minute.pdf_path) && (
+                        <Pressable
+                          style={styles.secondaryBtn}
+                          onPress={() => {
+                            const url =
+                              latestPdfResult?.pdfUrl ||
+                              (minute.pdf_path ? getPublicMinutePdfUrl(minute.pdf_path) : '');
+                            handleOpenExternalUrl(
+                              url,
+                              'No se pudo abrir el archivo PDF oficial del acta.'
+                            ).catch(() => {});
+                          }}
+                        >
+                          <Text style={styles.secondaryBtnText}>Abrir PDF oficial</Text>
+                        </Pressable>
+                      )}
+
                       <Pressable
                         style={styles.secondaryBtn}
                         disabled={busyAction}
@@ -545,23 +700,30 @@ export function MeetingsScreen({
                       >
                         <Text style={styles.secondaryBtnText}>Editar borrador de acta</Text>
                       </Pressable>
-                      <View style={styles.rowGap}>
-                        <Pressable
-                          style={styles.approveBtnFlex}
-                          disabled={busyAction}
-                          onPress={() => handleSaveMinute('aprobada')}
-                        >
-                          <Text style={styles.primaryBtnText}>Aprobar acta</Text>
-                        </Pressable>
-                        <Pressable
-                          style={styles.darkBtnFlex}
-                          disabled={busyAction}
-                          onPress={() => handleSaveMinute('asentada_en_libro')}
-                        >
-                          <Text style={styles.primaryBtnText}>Asentada en libro</Text>
-                        </Pressable>
-                      </View>
+
+                      <Pressable
+                        style={styles.darkBtn}
+                        disabled={busyAction}
+                        onPress={() => handleSaveMinute('asentada_en_libro')}
+                      >
+                        <Text style={styles.primaryBtnText}>Marcar asentada en libro</Text>
+                      </Pressable>
                     </View>
+                  )}
+
+                  {!isBoard && minute.pdf_path && (
+                    <Pressable
+                      style={styles.secondaryBtn}
+                      onPress={() => {
+                        const url = getPublicMinutePdfUrl(minute.pdf_path!);
+                        handleOpenExternalUrl(
+                          url,
+                          'No se pudo abrir el archivo PDF oficial del acta.'
+                        ).catch(() => {});
+                      }}
+                    >
+                      <Text style={styles.secondaryBtnText}>📄 Abrir PDF oficial</Text>
+                    </Pressable>
                   )}
 
                   {/* Acuse de recibido y Conformidad digital (solo cuando el acta está aprobada o asentada) */}
@@ -933,12 +1095,31 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     alignItems: 'center',
   },
-  darkBtnFlex: {
-    flex: 1,
+  darkBtn: {
     backgroundColor: '#111827',
     borderRadius: 10,
     paddingVertical: 12,
     alignItems: 'center',
+  },
+  whatsappPdfBtn: {
+    backgroundColor: '#15803D',
+    borderRadius: 10,
+    paddingVertical: 13,
+    alignItems: 'center',
+  },
+  dualApprovalBox: {
+    backgroundColor: '#F9FAFB',
+    borderColor: '#D1D5DB',
+    borderWidth: 1,
+    borderRadius: 12,
+    padding: 12,
+    gap: 6,
+  },
+  warningNote: {
+    fontSize: 11,
+    color: '#92400E',
+    fontWeight: '600',
+    marginTop: 2,
   },
   primaryBtnText: {
     color: '#FFFFFF',

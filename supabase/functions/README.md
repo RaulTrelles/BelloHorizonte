@@ -10,10 +10,11 @@ Este directorio contiene las Edge Functions en **Deno / TypeScript** para:
 - `_shared/webhookAuth.ts`: Validación de la cabecera `x-webhook-secret` en tiempo constante contra `WEBHOOK_SECRET`.
 - `_shared/supabaseAdmin.ts`: Cliente Supabase administrativo y consultas reutilizables de tokens activos / limpieza de tokens inválidos.
 - `_shared/meetingsAi.ts`: Helpers puros para transcripción STT (`transcribeAudioChunk`), generación de borrador estructurado de acta (`generateStructuredMinute` + fallback determinístico) y hash SHA-256 (`computeSha256Hex`).
+- `_shared/minutePdf.ts`: Helper puro para generación de PDF oficial A4 (`buildOfficialMinutePdfBytes` con `pdf-lib`) y difusión por WhatsApp (`buildMinuteWhatsAppSharePayload`).
 - `dispatch-panic-alert/index.ts`: Disparada en `INSERT` de `public.alerts` (`estado = 'activa'`). Envía `PANIC_ALARM` a todos los miembros activos del grupo **excluyendo al emisor**.
 - `stop-panic-alert/index.ts`: Disparada en `UPDATE` de `public.alerts` cuando `estado` cambia de `'activa'` a `'resuelta'` o `'falsa_alarma'`. Envía `STOP_ALARM` a todos los miembros activos del grupo.
 - `transcribe-meeting-chunk/index.ts`: Autenticada por JWT (solo `admin`, `presidente` o `secretario` activo). Descarga un bloque de audio desde el bucket privado `meeting-recordings`, lo transcribe con Faster-Whisper y hace upsert en `public.transcripts`.
-- `generate-meeting-minute/index.ts`: Autenticada por JWT (solo `admin`, `presidente` o `secretario` activo). Soporta `action: 'generate'` (consolida transcripciones + asistentes, redacta borrador con DeepSeek-V3 o fallback determinístico, calcula `hash_sha256` y hace upsert en `public.minutes`) y `action: 'purge_audio'` (elimina audios del bucket privado `meeting-recordings` y marca `recordings.estado = 'eliminado'` — Ley 29733).
+- `generate-meeting-minute/index.ts`: Autenticada por JWT (solo `admin`, `presidente` o `secretario` activo). Soporta `action: 'generate'` (consolida transcripciones + asistentes, redacta borrador con DeepSeek-V3 o fallback determinístico, calcula `hash_sha256` y hace upsert en `public.minutes`), `action: 'purge_audio'` (elimina audios del bucket privado `meeting-recordings` y marca `recordings.estado = 'eliminado'` — Ley 29733) y `action: 'generate_pdf'` (exige doble confirmación Presidente + Secretario, genera el PDF oficial A4 con `pdf-lib`, lo sube al bucket público `meeting-minutes-pdf`, actualiza `minutes.pdf_path` y retorna `pdfUrl`, `whatsappText` y `whatsappShareUrl`).
 
 ---
 

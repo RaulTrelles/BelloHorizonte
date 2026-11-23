@@ -1,5 +1,6 @@
 const mockRpc = jest.fn();
 const mockFrom = jest.fn();
+const mockFunctionsInvoke = jest.fn();
 const mockSignOut = jest.fn();
 const mockSignInWithOAuth = jest.fn();
 const mockExchangeCodeForSession = jest.fn();
@@ -19,6 +20,9 @@ jest.mock('../supabaseClient', () => ({
   getSupabaseClient: () => ({
     rpc: mockRpc,
     from: mockFrom,
+    functions: {
+      invoke: mockFunctionsInvoke,
+    },
     auth: {
       signOut: mockSignOut,
       signInWithOAuth: mockSignInWithOAuth,
@@ -38,13 +42,17 @@ import {
   canManageMeetings,
   canUseAdminTestControls,
   closePanicAlert,
+  confirmMinuteByRole,
   CooldownActiveError,
   createPanicAlert,
   deleteMyAccount,
   extractOAuthCallbackParams,
+  generateOfficialMinutePdf,
   getGroupInviteCode,
+  getPublicMinutePdfUrl,
   GROUPS_SAFE_COLUMNS,
   isCooldownError,
+  isMinuteFullyApproved,
   OAUTH_REDIRECT_URI,
   PROFILES_SAFE_COLUMNS,
   regenerateGroupInviteCode,
@@ -259,5 +267,61 @@ describe('belloHorizonteApi', () => {
       refreshToken: undefined,
       errorDescription: 'access_denied',
     });
+  });
+
+  it('valida doble confirmación directiva (isMinuteFullyApproved) y URL pública de PDF', () => {
+    expect(isMinuteFullyApproved(null)).toBe(false);
+    expect(
+      isMinuteFullyApproved({
+        aprobada_presidente_at: '2026-11-23T15:00:00Z',
+        aprobada_secretario_at: null,
+      })
+    ).toBe(false);
+    expect(
+      isMinuteFullyApproved({
+        aprobada_presidente_at: null,
+        aprobada_secretario_at: '2026-11-23T15:05:00Z',
+      })
+    ).toBe(false);
+    expect(
+      isMinuteFullyApproved({
+        aprobada_presidente_at: '2026-11-23T15:00:00Z',
+        aprobada_secretario_at: '2026-11-23T15:05:00Z',
+      })
+    ).toBe(true);
+
+    expect(
+      getPublicMinutePdfUrl('/grp-1/mtg-1/acta.pdf', 'https://znvzcfllibajvmmjtsct.supabase.co/')
+    ).toBe(
+      'https://znvzcfllibajvmmjtsct.supabase.co/storage/v1/object/public/meeting-minutes-pdf/grp-1/mtg-1/acta.pdf'
+    );
+    expect(getPublicMinutePdfUrl('', 'https://znvzcfllibajvmmjtsct.supabase.co')).toBe('');
+  });
+
+  it('invoca confirm_minute_by_role y generate_pdf correctamente', async () => {
+    mockRpc.mockResolvedValueOnce({ data: { id: 'min-1' }, error: null });
+    await confirmMinuteByRole('min-1', 'presidente');
+    expect(mockRpc).toHaveBeenCalledWith('confirm_minute_by_role', {
+      p_minute_id: 'min-1',
+      p_as_role: 'presidente',
+    });
+
+    mockFunctionsInvoke.mockResolvedValueOnce({
+      data: {
+        pdfPath: 'grp-1/mtg-1/acta.pdf',
+        pdfUrl: 'https://example.supabase.co/storage/v1/object/public/meeting-minutes-pdf/grp-1/mtg-1/acta.pdf',
+        whatsappText: 'Acta lista',
+        whatsappShareUrl: 'https://wa.me/?text=Acta%20lista',
+      },
+      error: null,
+    });
+    const pdfRes = await generateOfficialMinutePdf('mtg-1');
+    expect(mockFunctionsInvoke).toHaveBeenCalledWith('generate-meeting-minute', {
+      body: {
+        meetingId: 'mtg-1',
+        action: 'generate_pdf',
+      },
+    });
+    expect(pdfRes.whatsappShareUrl).toBe('https://wa.me/?text=Acta%20lista');
   });
 });

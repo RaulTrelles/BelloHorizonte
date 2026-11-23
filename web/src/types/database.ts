@@ -184,6 +184,10 @@ export interface MinuteRow {
   hash_sha256: string | null;
   plazo_observaciones_hasta: string | null;
   aprobada_por: string | null;
+  aprobada_presidente_por: string | null;
+  aprobada_presidente_at: string | null;
+  aprobada_secretario_por: string | null;
+  aprobada_secretario_at: string | null;
   created_at: string;
 }
 

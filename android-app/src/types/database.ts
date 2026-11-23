@@ -186,7 +186,18 @@ export interface MinuteRecord {
   hash_sha256: string | null;
   plazo_observaciones_hasta: string | null;
   aprobada_por: string | null;
+  aprobada_presidente_por: string | null;
+  aprobada_presidente_at: string | null;
+  aprobada_secretario_por: string | null;
+  aprobada_secretario_at: string | null;
   created_at: string;
+}
+
+export interface OfficialMinutePdfResult {
+  pdfPath: string;
+  pdfUrl: string;
+  whatsappText: string;
+  whatsappShareUrl: string;
 }
 
 export interface MinuteSignatureRecord {
@@ -205,5 +216,7 @@ export interface MeetingDetailsBundle {
   recordings: RecordingRecord[];
   transcripts: TranscriptRecord[];
   minute: MinuteRecord | null;
+  presidentApproverName: string | null;
+  secretaryApproverName: string | null;
   signatures: Array<MinuteSignatureRecord & { userName: string }>;
 }

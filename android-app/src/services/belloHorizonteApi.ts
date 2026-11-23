@@ -28,6 +28,7 @@ import type {
   MinuteSignatureRecord,
   MinuteSignatureType,
   MinuteStatus,
+  OfficialMinutePdfResult,
   ProfileRecord,
   RecordingRecord,
   TranscriptRecord,
@@ -36,6 +37,10 @@ import { getSupabaseClient } from './supabaseClient';
 
 export const OAUTH_REDIRECT_URI = 'pe.bellohorizonte.alarma://auth-callback';
 export const MEETING_RECORDINGS_BUCKET = 'meeting-recordings';
+export const MEETING_MINUTES_PDF_BUCKET = 'meeting-minutes-pdf';
+
+const MINUTES_SELECT_COLUMNS =
+  'id, meeting_id, contenido, estado, pdf_path, hash_sha256, plazo_observaciones_hasta, aprobada_por, aprobada_presidente_por, aprobada_presidente_at, aprobada_secretario_por, aprobada_secretario_at, created_at';
 
 /**
  * Visibilidad estricta de controles de prueba/simulación de alarma (BH-025):
@@ -885,9 +890,7 @@ export async function getMeetingDetails(
       .order('created_at', { ascending: true }),
     supabase
       .from('minutes')
-      .select(
-        'id, meeting_id, contenido, estado, pdf_path, hash_sha256, plazo_observaciones_hasta, aprobada_por, created_at'
-      )
+      .select(MINUTES_SELECT_COLUMNS)
       .eq('meeting_id', meetingId)
       .order('created_at', { ascending: false })
       .limit(1)
@@ -952,6 +955,12 @@ export async function getMeetingDetails(
     recordings,
     transcripts,
     minute,
+    presidentApproverName: minute?.aprobada_presidente_por
+      ? namesMap.get(minute.aprobada_presidente_por) ?? 'Presidente'
+      : null,
+    secretaryApproverName: minute?.aprobada_secretario_por
+      ? namesMap.get(minute.aprobada_secretario_por) ?? 'Secretaría'
+      : null,
     signatures,
   };
 }
@@ -1077,15 +1086,94 @@ export async function updateMinuteContentAndStatus(
     .from('minutes')
     .update(patch)
     .eq('id', minuteId)
-    .select(
-      'id, meeting_id, contenido, estado, pdf_path, hash_sha256, plazo_observaciones_hasta, aprobada_por, created_at'
-    )
+    .select(MINUTES_SELECT_COLUMNS)
     .single();
 
   if (error) {
     throw error;
   }
   return data as MinuteRecord;
+}
+
+/**
+ * Retorna true únicamente cuando el acta cuenta con doble confirmación directiva
+ * (Presidente + Secretario/a).
+ */
+export function isMinuteFullyApproved(
+  minute: Pick<MinuteRecord, 'aprobada_presidente_at' | 'aprobada_secretario_at'> | null | undefined
+): boolean {
+  return Boolean(minute?.aprobada_presidente_at && minute?.aprobada_secretario_at);
+}
+
+/**
+ * Construye la URL pública del PDF oficial del acta en Supabase Storage.
+ */
+export function getPublicMinutePdfUrl(pdfPath: string, supabaseUrl?: string): string {
+  const base = (supabaseUrl ?? process.env.EXPO_PUBLIC_SUPABASE_URL ?? '').trim().replace(/\/+$/, '');
+  const cleanPath = pdfPath.trim().replace(/^\/+/, '');
+  if (!base || !cleanPath) {
+    return '';
+  }
+  return `${base}/storage/v1/object/public/${MEETING_MINUTES_PDF_BUCKET}/${cleanPath}`;
+}
+
+/**
+ * Registra la confirmación directiva del Presidente o de Secretaría mediante RPC.
+ */
+export async function confirmMinuteByRole(
+  minuteId: string,
+  asRole?: 'presidente' | 'secretario'
+): Promise<MinuteRecord | null> {
+  const supabase = getSupabaseClient();
+  const { data, error } = await supabase.rpc('confirm_minute_by_role', {
+    p_minute_id: minuteId,
+    p_as_role: asRole ?? null,
+  });
+
+  if (error) {
+    throw error;
+  }
+  return (data as MinuteRecord | null) ?? null;
+}
+
+/**
+ * Genera el PDF oficial del acta (requiere doble confirmación Presidente + Secretaría)
+ * y retorna los enlaces listos para abrir el PDF y difundirlo por WhatsApp.
+ */
+export async function generateOfficialMinutePdf(
+  meetingId: string
+): Promise<OfficialMinutePdfResult> {
+  const supabase = getSupabaseClient();
+  const { data, error } = await supabase.functions.invoke('generate-meeting-minute', {
+    body: {
+      meetingId,
+      action: 'generate_pdf',
+    },
+  });
+
+  if (error) {
+    throw error;
+  }
+
+  const raw = (data ?? {}) as Partial<OfficialMinutePdfResult>;
+  const pdfPath = String(raw.pdfPath ?? '');
+  const pdfUrl = String(raw.pdfUrl ?? (pdfPath ? getPublicMinutePdfUrl(pdfPath) : ''));
+  const whatsappText = String(
+    raw.whatsappText ??
+      (pdfUrl
+        ? `📄 Acta Oficial — Asociación Bello Horizonte\nDescarga el PDF aquí: ${pdfUrl}`
+        : '📄 Acta Oficial — Asociación Bello Horizonte')
+  );
+  const whatsappShareUrl = String(
+    raw.whatsappShareUrl ?? buildWhatsAppShareUrl(whatsappText)
+  );
+
+  return {
+    pdfPath,
+    pdfUrl,
+    whatsappText,
+    whatsappShareUrl,
+  };
 }
 
 export async function purgeMeetingAudio(meetingId: string): Promise<void> {

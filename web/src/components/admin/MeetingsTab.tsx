@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   CalendarDays,
   Plus,
@@ -21,6 +21,11 @@ import {
   Hash,
   FileCheck2,
   ListChecks,
+  Copy,
+  Check,
+  ExternalLink,
+  MessageCircle,
+  UserCheck,
 } from "lucide-react";
 import { getSupabaseBrowserClient } from "@/lib/supabase";
 import type {
@@ -307,6 +312,26 @@ export function MeetingsTab({
     string | null
   >(null);
 
+  // Doble confirmación directiva + PDF oficial + WhatsApp
+  const [confirmingRole, setConfirmingRole] = useState<
+    "presidente" | "secretario" | null
+  >(null);
+  const [generatingPdf, setGeneratingPdf] = useState(false);
+  const [pdfUrl, setPdfUrl] = useState<string | null>(null);
+  const [serverWhatsappText, setServerWhatsappText] = useState<string | null>(
+    null
+  );
+  const [copiedWa, setCopiedWa] = useState(false);
+  const copiedWaTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (copiedWaTimeoutRef.current !== null) {
+        clearTimeout(copiedWaTimeoutRef.current);
+      }
+    };
+  }, []);
+
   const loadMeetingsList = useCallback(async () => {
     const supabase = getSupabaseBrowserClient();
     if (!supabase) return;
@@ -376,7 +401,7 @@ export function MeetingsTab({
         supabase
           .from("minutes")
           .select(
-            "id, meeting_id, contenido, estado, pdf_path, hash_sha256, plazo_observaciones_hasta, aprobada_por, created_at"
+            "id, meeting_id, contenido, estado, pdf_path, hash_sha256, plazo_observaciones_hasta, aprobada_por, aprobada_presidente_por, aprobada_presidente_at, aprobada_secretario_por, aprobada_secretario_at, created_at"
           )
           .eq("meeting_id", meetingId)
           .order("created_at", { ascending: false })
@@ -420,6 +445,20 @@ export function MeetingsTab({
       setMinutePlazoObs(
         toDatetimeLocalValue(foundMinute?.plazo_observaciones_hasta ?? null)
       );
+      setServerWhatsappText(null);
+
+      if (foundMinute?.pdf_path) {
+        const { data } = supabase.storage
+          .from("meeting-minutes-pdf")
+          .getPublicUrl(foundMinute.pdf_path);
+        setPdfUrl(
+          data.publicUrl && /^https?:\/\//i.test(data.publicUrl)
+            ? data.publicUrl
+            : null
+        );
+      } else {
+        setPdfUrl(null);
+      }
 
       if (foundMinute) {
         const { data: sigData, error: sigErr } = await supabase
@@ -752,6 +791,177 @@ export function MeetingsTab({
 
   function handlePrintMinute() {
     window.print();
+  }
+
+  async function handleConfirmByRole(role: "presidente" | "secretario") {
+    if (!minute || !selectedMeeting) return;
+    const supabase = getSupabaseBrowserClient();
+    if (!supabase) return;
+
+    setConfirmingRole(role);
+    setErrorMsg(null);
+    setSuccessMsg(null);
+    try {
+      const { error } = await supabase.rpc("confirm_minute_by_role", {
+        p_minute_id: minute.id,
+        p_as_role: role,
+      });
+
+      if (error) throw error;
+
+      setSuccessMsg(
+        role === "presidente"
+          ? "Acta confirmada como Presidente correctamente."
+          : "Acta confirmada como Secretario/a correctamente."
+      );
+      await loadMeetingDetail(selectedMeeting.id);
+    } catch (err) {
+      setErrorMsg(
+        err instanceof Error
+          ? err.message
+          : "No se pudo registrar la confirmación directiva."
+      );
+    } finally {
+      setConfirmingRole(null);
+    }
+  }
+
+  async function handleGeneratePdf() {
+    if (!selectedMeeting || !minute) return;
+    const supabase = getSupabaseBrowserClient();
+    if (!supabase) return;
+
+    setGeneratingPdf(true);
+    setErrorMsg(null);
+    setSuccessMsg(null);
+    try {
+      const { data, error } = await supabase.functions.invoke(
+        "generate-meeting-minute",
+        {
+          body: {
+            meetingId: selectedMeeting.id,
+            action: "generate_pdf",
+          },
+        }
+      );
+
+      if (error) throw error;
+
+      const payload = (data ?? {}) as {
+        error?: unknown;
+        pdfUrl?: unknown;
+        pdf_url?: unknown;
+        whatsappText?: unknown;
+        whatsappMessage?: unknown;
+      };
+
+      if (payload.error) {
+        throw new Error(String(payload.error));
+      }
+
+      const returnedUrl =
+        typeof payload.pdfUrl === "string"
+          ? payload.pdfUrl
+          : typeof payload.pdf_url === "string"
+            ? payload.pdf_url
+            : null;
+      const returnedWaText =
+        typeof payload.whatsappText === "string"
+          ? payload.whatsappText
+          : typeof payload.whatsappMessage === "string"
+            ? payload.whatsappMessage
+            : null;
+
+      await loadMeetingDetail(selectedMeeting.id);
+      if (returnedUrl && /^https?:\/\//i.test(returnedUrl)) {
+        setPdfUrl(returnedUrl);
+      }
+      if (returnedWaText) setServerWhatsappText(returnedWaText);
+
+      setSuccessMsg(
+        "PDF oficial generado correctamente. Ya puedes descargarlo o difundirlo al grupo de WhatsApp."
+      );
+    } catch (err) {
+      setErrorMsg(
+        err instanceof Error
+          ? err.message
+          : "No se pudo generar el PDF oficial del acta."
+      );
+    } finally {
+      setGeneratingPdf(false);
+    }
+  }
+
+  const isDoubleConfirmed = Boolean(
+    minute?.aprobada_presidente_at && minute?.aprobada_secretario_at
+  );
+
+  const canConfirmPresidente =
+    currentRole === "presidente" || currentRole === "admin";
+  const canConfirmSecretario =
+    currentRole === "secretario" || currentRole === "admin";
+
+  const whatsappMessage = useMemo(() => {
+    if (serverWhatsappText) return serverWhatsappText;
+    if (!selectedMeeting) return "";
+
+    const lines: string[] = [
+      `*ACTA OFICIAL — ${groupName || "Asociación Bello Horizonte"}*`,
+      `📋 *Reunión:* ${selectedMeeting.titulo}`,
+      `📅 *Fecha:* ${formatDateTimePE(selectedMeeting.fecha)}`,
+      "✅ Aprobada por Presidente y Secretario/a.",
+    ];
+
+    if (structured.acuerdos.length > 0) {
+      lines.push("", "*Resumen de acuerdos:*");
+      structured.acuerdos.slice(0, 5).forEach((item, idx) => {
+        const resp = item.responsable ? ` (${item.responsable})` : "";
+        const plazo = item.plazo ? ` — Plazo: ${item.plazo}` : "";
+        lines.push(`${idx + 1}. ${item.acuerdo}${resp}${plazo}`);
+      });
+    }
+
+    if (pdfUrl) {
+      lines.push("", `📄 *PDF Oficial del Acta:*\n${pdfUrl}`);
+    }
+
+    if (minute?.hash_sha256) {
+      lines.push(
+        "",
+        `🔒 *Integridad SHA-256:* ${minute.hash_sha256.slice(0, 16)}...`
+      );
+    }
+
+    return lines.join("\n");
+  }, [
+    serverWhatsappText,
+    selectedMeeting,
+    groupName,
+    structured.acuerdos,
+    pdfUrl,
+    minute?.hash_sha256,
+  ]);
+
+  const whatsappShareUrl = useMemo(() => {
+    if (!whatsappMessage) return "#";
+    return `https://wa.me/?text=${encodeURIComponent(whatsappMessage)}`;
+  }, [whatsappMessage]);
+
+  async function handleCopyWhatsAppMessage() {
+    if (!whatsappMessage) return;
+    try {
+      await navigator.clipboard.writeText(whatsappMessage);
+      setCopiedWa(true);
+      if (copiedWaTimeoutRef.current !== null) {
+        clearTimeout(copiedWaTimeoutRef.current);
+      }
+      copiedWaTimeoutRef.current = setTimeout(() => {
+        setCopiedWa(false);
+        copiedWaTimeoutRef.current = null;
+      }, 2000);
+    } catch {
+      // Fallback silencioso si el navegador bloquea el portapapeles
+    }
   }
 
   const attendanceCounts = useMemo(() => {
@@ -1476,6 +1686,220 @@ export function MeetingsTab({
                       )}
                     </button>
                   </div>
+
+                  {/* Doble Confirmación Directiva + Generar PDF y Difundir por WhatsApp */}
+                  {minute && (
+                    <div className="mt-6 rounded-2xl border border-brand-200 bg-brand-50/40 p-4 sm:p-5">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <div className="flex items-center gap-2">
+                          <ShieldCheck className="h-5 w-5 text-brand-700" />
+                          <h5 className="text-sm font-bold text-slate-900">
+                            Doble Confirmación Directiva (requisito para generar
+                            PDF y difundir)
+                          </h5>
+                        </div>
+                        <span
+                          className={`rounded-full px-2.5 py-0.5 text-xs font-semibold ${
+                            isDoubleConfirmed
+                              ? "bg-emerald-100 text-emerald-800"
+                              : "bg-amber-100 text-amber-800"
+                          }`}
+                        >
+                          {isDoubleConfirmed
+                            ? "Doble confirmación completa"
+                            : "Pendiente de firmas directivas"}
+                        </span>
+                      </div>
+
+                      <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                        {/* Tarjeta Presidente */}
+                        <div className="flex flex-col justify-between rounded-xl border border-slate-200 bg-white p-4">
+                          <div>
+                            <p className="text-xs font-bold uppercase tracking-wide text-slate-500">
+                              Presidente
+                            </p>
+                            {minute.aprobada_presidente_at ? (
+                              <div className="mt-1.5 space-y-0.5">
+                                <p className="text-xs font-semibold text-emerald-700">
+                                  ✅ Confirmado por{" "}
+                                  {(minute.aprobada_presidente_por &&
+                                    memberNames[
+                                      minute.aprobada_presidente_por
+                                    ]) ||
+                                    "Presidente"}
+                                </p>
+                                <p className="text-[11px] text-slate-500">
+                                  {formatDateTimePE(
+                                    minute.aprobada_presidente_at
+                                  )}
+                                </p>
+                              </div>
+                            ) : (
+                              <p className="mt-1.5 text-xs font-medium text-amber-700">
+                                ⏳ Pendiente de confirmación
+                              </p>
+                            )}
+                          </div>
+
+                          {canConfirmPresidente &&
+                            !minute.aprobada_presidente_at && (
+                              <button
+                                type="button"
+                                disabled={confirmingRole !== null}
+                                onClick={() =>
+                                  handleConfirmByRole("presidente")
+                                }
+                                className="mt-3 inline-flex items-center justify-center gap-1.5 rounded-xl bg-brand-800 px-3.5 py-2 text-xs font-semibold text-white transition hover:bg-brand-900 disabled:opacity-50"
+                              >
+                                {confirmingRole === "presidente" ? (
+                                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                ) : (
+                                  <UserCheck className="h-3.5 w-3.5" />
+                                )}
+                                Confirmar como Presidente
+                              </button>
+                            )}
+                        </div>
+
+                        {/* Tarjeta Secretario/a */}
+                        <div className="flex flex-col justify-between rounded-xl border border-slate-200 bg-white p-4">
+                          <div>
+                            <p className="text-xs font-bold uppercase tracking-wide text-slate-500">
+                              Secretario/a
+                            </p>
+                            {minute.aprobada_secretario_at ? (
+                              <div className="mt-1.5 space-y-0.5">
+                                <p className="text-xs font-semibold text-emerald-700">
+                                  ✅ Confirmado por{" "}
+                                  {(minute.aprobada_secretario_por &&
+                                    memberNames[
+                                      minute.aprobada_secretario_por
+                                    ]) ||
+                                    "Secretario/a"}
+                                </p>
+                                <p className="text-[11px] text-slate-500">
+                                  {formatDateTimePE(
+                                    minute.aprobada_secretario_at
+                                  )}
+                                </p>
+                              </div>
+                            ) : (
+                              <p className="mt-1.5 text-xs font-medium text-amber-700">
+                                ⏳ Pendiente de confirmación
+                              </p>
+                            )}
+                          </div>
+
+                          {canConfirmSecretario &&
+                            !minute.aprobada_secretario_at && (
+                              <button
+                                type="button"
+                                disabled={confirmingRole !== null}
+                                onClick={() =>
+                                  handleConfirmByRole("secretario")
+                                }
+                                className="mt-3 inline-flex items-center justify-center gap-1.5 rounded-xl bg-brand-800 px-3.5 py-2 text-xs font-semibold text-white transition hover:bg-brand-900 disabled:opacity-50"
+                              >
+                                {confirmingRole === "secretario" ? (
+                                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                ) : (
+                                  <UserCheck className="h-3.5 w-3.5" />
+                                )}
+                                Confirmar como Secretario/a
+                              </button>
+                            )}
+                        </div>
+                      </div>
+
+                      <p className="mt-3 text-[11px] text-slate-600">
+                        <em>
+                          Si editas y guardas el texto del acta, ambas
+                          confirmaciones se reinician automáticamente para
+                          garantizar integridad.
+                        </em>
+                      </p>
+
+                      {/* Acción principal condicional: Generar PDF y Difundir */}
+                      <div className="mt-4 flex flex-wrap items-center gap-2.5 border-t border-brand-200/70 pt-4">
+                        <button
+                          type="button"
+                          onClick={handleGeneratePdf}
+                          disabled={!isDoubleConfirmed || generatingPdf}
+                          className="inline-flex items-center gap-2 rounded-xl bg-brand-800 px-4 py-2.5 text-xs font-semibold text-white shadow-sm transition hover:bg-brand-900 disabled:cursor-not-allowed disabled:opacity-50"
+                        >
+                          {generatingPdf ? (
+                            <>
+                              <Loader2 className="h-4 w-4 animate-spin" />
+                              Generando PDF oficial...
+                            </>
+                          ) : (
+                            <>📄 Generar PDF y Difundir por WhatsApp</>
+                          )}
+                        </button>
+
+                        {!isDoubleConfirmed && (
+                          <span className="text-xs text-amber-800">
+                            Requiere confirmación de Presidente y Secretario/a.
+                          </span>
+                        )}
+                      </div>
+
+                      {/* Acciones post-generación (cuando pdfUrl o minute.pdf_path existe) */}
+                      {(pdfUrl || minute.pdf_path) && (
+                        <div className="mt-4 flex flex-wrap items-center gap-2.5 rounded-xl border border-emerald-200 bg-emerald-50/70 p-3.5">
+                          {pdfUrl ? (
+                            <a
+                              href={pdfUrl}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="inline-flex items-center gap-1.5 rounded-xl border border-brand-300 bg-white px-3.5 py-2 text-xs font-semibold text-brand-900 shadow-sm transition hover:bg-brand-50"
+                            >
+                              <ExternalLink className="h-3.5 w-3.5" />
+                              Descargar / Ver PDF oficial
+                            </a>
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={handleGeneratePdf}
+                              disabled={!isDoubleConfirmed || generatingPdf}
+                              className="inline-flex items-center gap-1.5 rounded-xl border border-brand-300 bg-white px-3.5 py-2 text-xs font-semibold text-brand-900 shadow-sm transition hover:bg-brand-50 disabled:opacity-50"
+                            >
+                              <ExternalLink className="h-3.5 w-3.5" />
+                              Descargar / Ver PDF oficial
+                            </button>
+                          )}
+
+                          <a
+                            href={whatsappShareUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="inline-flex items-center gap-1.5 rounded-xl bg-emerald-600 px-3.5 py-2 text-xs font-semibold text-white shadow-sm transition hover:bg-emerald-700"
+                          >
+                            <MessageCircle className="h-3.5 w-3.5" />
+                            📲 Difundir al grupo de WhatsApp
+                          </a>
+
+                          <button
+                            type="button"
+                            onClick={handleCopyWhatsAppMessage}
+                            className="inline-flex items-center gap-1.5 rounded-xl border border-slate-300 bg-white px-3.5 py-2 text-xs font-semibold text-slate-700 transition hover:bg-slate-50"
+                          >
+                            {copiedWa ? (
+                              <>
+                                <Check className="h-3.5 w-3.5 text-emerald-600" />
+                                Mensaje copiado
+                              </>
+                            ) : (
+                              <>
+                                <Copy className="h-3.5 w-3.5" />
+                                Copiar mensaje para WhatsApp
+                              </>
+                            )}
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  )}
 
                   {/* Cuadro de conformidades digitales y acuses de recibido */}
                   <div className="mt-6 border-t border-slate-200 pt-5">
