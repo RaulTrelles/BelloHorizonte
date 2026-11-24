@@ -8,7 +8,7 @@ Esta guía reúne todos los datos, textos y pasos para publicar **`pe.bellohoriz
 
 - **Archivo a subir**: `android-app/android/app/build/outputs/bundle/release/app-release.aab`
 - **ID de paquete**: `pe.bellohorizonte.alarma`
-- **Versión inicial de producción**: `versionName = "1.0.0"`, `versionCode = 2`
+- **Versión inicial de producción**: `versionName = "1.0.0"`, `versionCode = 4`, `targetSdkVersion = 36` (Android 16)
 - **Arquitecturas incluidas**: `arm64-v8a` y `armeabi-v7a` (requerido por Google Play 64-bit).
 
 ### Respaldo OBLIGATORIO del Upload Keystore

@@ -29,7 +29,7 @@ export default ({ config }: ConfigContext): ExpoConfig => {
     newArchEnabled: false,
     android: {
       package: 'pe.bellohorizonte.alarma',
-      versionCode: 2,
+      versionCode: 4,
       adaptiveIcon: {
         foregroundImage: './assets/adaptive-icon.png',
         backgroundColor: '#0A6EE1',

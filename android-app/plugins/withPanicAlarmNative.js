@@ -253,8 +253,8 @@ if (hasReleaseKeystore) {
     );
 
     contents = contents.replace(
-      /release\s*\{([\s\S]*?)signingConfig\s+signingConfigs\.debug/,
-      'release {$1signingConfig hasReleaseKeystore ? signingConfigs.release : signingConfigs.debug'
+      /(buildTypes\s*\{[\s\S]*?\brelease\s*\{[\s\S]*?)signingConfig\s+signingConfigs\.debug/,
+      '$1signingConfig hasReleaseKeystore ? signingConfigs.release : signingConfigs.debug'
     );
 
     modConfig.modResults.contents = contents;
