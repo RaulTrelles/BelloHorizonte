@@ -43,7 +43,7 @@ VALUES (
         {"cargo": "Administrador de Seguridad (Titular)", "nombre": "Por definir"},
         {"cargo": "Administrador de Seguridad (Suplente)", "nombre": "Por definir"}
     ]'::jsonb,
-    '/privacidad'
+    'https://bellohorizonte.vercel.app/privacidad'
 )
 ON CONFLICT (group_id) DO NOTHING;
 

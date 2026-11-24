@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
+  Image,
   KeyboardAvoidingView,
   Platform,
   Pressable,
@@ -11,8 +12,11 @@ import {
   TextInput,
   View,
 } from 'react-native';
+
+const BELLO_HORIZONTE_BANNER = require('../../assets/images/bello-horizonte-banner.png');
 import { SafeAreaView } from 'react-native-safe-area-context';
 import {
+  getLastGoogleEmail,
   isSyntheticPhoneEmail,
   joinGroupByCode,
   normalizePeruPhoneDigits,
@@ -47,7 +51,7 @@ export function JoinScreen({
   const [loginIdentifier, setLoginIdentifier] = useState<string>('');
   const [optionalEmail, setOptionalEmail] = useState<string>('');
   const [password, setPassword] = useState<string>('');
-  const [codigo, setCodigo] = useState<string>('BH-2026');
+  const [codigo, setCodigo] = useState<string>('');
   const [nombre, setNombre] = useState<string>(initialName?.trim() ?? '');
   const [telefono, setTelefono] = useState<string>('+51 ');
   const [direccionLote, setDireccionLote] = useState<string>('');
@@ -55,7 +59,20 @@ export function JoinScreen({
 
   const [submitting, setSubmitting] = useState<boolean>(false);
   const [googleLoading, setGoogleLoading] = useState<boolean>(false);
+  const [lastGoogleEmail, setLastGoogleEmail] = useState<string | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    getLastGoogleEmail().then((saved) => {
+      if (active) {
+        setLastGoogleEmail(saved);
+      }
+    });
+    return () => {
+      active = false;
+    };
+  }, []);
 
   useEffect(() => {
     if (initialName && !nombre.trim()) {
@@ -63,12 +80,14 @@ export function JoinScreen({
     }
   }, [initialName, nombre]);
 
-  const handleGoogleSignIn = async (): Promise<void> => {
+  const handleGoogleSignIn = async (forceSelectAccount = false): Promise<void> => {
     setErrorMsg(null);
     setGoogleLoading(true);
     try {
-      const result = await signInWithGoogle();
+      const result = await signInWithGoogle({ forceSelectAccount });
       if (!result.cancelled) {
+        const updatedEmail = await getLastGoogleEmail();
+        setLastGoogleEmail(updatedEmail);
         await onAuthCompleted();
       }
     } catch (err) {
@@ -209,15 +228,32 @@ export function JoinScreen({
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       >
         <ScrollView contentContainerStyle={styles.scrollContent} keyboardShouldPersistTaps="handled">
+          <View style={styles.heroCoverCard}>
+            <Image
+              source={BELLO_HORIZONTE_BANNER}
+              style={styles.heroCoverImage}
+              resizeMode="cover"
+              accessibilityLabel="Vista panorámica de Asociación Bello Horizonte"
+            />
+            <View style={styles.heroCoverOverlay}>
+              <Text style={styles.heroCoverBadge}>ASOCIACIÓN BELLO HORIZONTE</Text>
+              <Text style={styles.heroCoverTitle}>
+                {isJoinOnly
+                  ? 'Completar registro a la cuadra'
+                  : mode === 'login'
+                    ? 'Bienvenido a tu cuadra segura'
+                    : 'Únete a la red vecinal'}
+              </Text>
+            </View>
+          </View>
+
           <View style={styles.brandHeader}>
-            <Text style={styles.brandBadge}>ASOCIACIÓN BELLO HORIZONTE</Text>
-            <Text style={styles.title}>
-              {isJoinOnly ? 'Completar registro a la cuadra' : 'Alarma Vecinal'}
-            </Text>
             <Text style={styles.subtitle}>
               {isJoinOnly
                 ? `Sesión iniciada con ${visibleAccountLabel}. Completa tus datos y el código de tu cuadra para solicitar acceso.`
-                : 'Protección comunitaria contra robos en la cuadra (Perú, +51).'}
+                : mode === 'login'
+                  ? 'Inicia sesión para recibir alertas comunitarias y gestionar reuniones.'
+                  : 'Regístrate con el código de tu cuadra para solicitar aprobación de la directiva.'}
             </Text>
           </View>
 
@@ -254,15 +290,29 @@ export function JoinScreen({
               <>
                 <Pressable
                   style={[styles.googleButton, isBusy && styles.buttonDisabled]}
-                  onPress={handleGoogleSignIn}
+                  onPress={() => handleGoogleSignIn(false)}
                   disabled={isBusy}
                 >
                   {googleLoading ? (
                     <ActivityIndicator color="#111827" />
                   ) : (
-                    <Text style={styles.googleButtonText}>G  Continuar con Google</Text>
+                    <Text style={styles.googleButtonText} numberOfLines={1} ellipsizeMode="middle">
+                      {lastGoogleEmail
+                        ? `G  Continuar como ${lastGoogleEmail}`
+                        : 'G  Continuar con Google'}
+                    </Text>
                   )}
                 </Pressable>
+
+                {lastGoogleEmail && (
+                  <Pressable
+                    style={styles.switchGoogleLink}
+                    onPress={() => handleGoogleSignIn(true)}
+                    disabled={isBusy}
+                  >
+                    <Text style={styles.switchGoogleLinkText}>Cambiar de cuenta Google</Text>
+                  </Pressable>
+                )}
 
                 <View style={styles.dividerRow}>
                   <View style={styles.dividerLine} />
@@ -427,10 +477,47 @@ const styles = StyleSheet.create({
     gap: 16,
     paddingBottom: 36,
   },
+  heroCoverCard: {
+    borderRadius: 18,
+    overflow: 'hidden',
+    backgroundColor: '#0A6EE1',
+    shadowColor: '#000',
+    shadowOpacity: 0.16,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 4,
+  },
+  heroCoverImage: {
+    width: '100%',
+    height: 300,
+    backgroundColor: '#0A6EE1',
+  },
+  heroCoverOverlay: {
+    backgroundColor: '#0F172A',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    gap: 4,
+  },
+  heroCoverBadge: {
+    alignSelf: 'flex-start',
+    backgroundColor: '#B91C1C',
+    color: '#FFFFFF',
+    fontSize: 10,
+    fontWeight: '900',
+    letterSpacing: 1,
+    paddingHorizontal: 10,
+    paddingVertical: 3,
+    borderRadius: 999,
+    overflow: 'hidden',
+  },
+  heroCoverTitle: {
+    fontSize: 20,
+    fontWeight: '900',
+    color: '#FFFFFF',
+  },
   brandHeader: {
     alignItems: 'center',
-    gap: 6,
-    marginTop: 8,
+    gap: 4,
   },
   brandBadge: {
     backgroundColor: '#FEE2E2',
@@ -492,12 +579,23 @@ const styles = StyleSheet.create({
     borderColor: '#D1D5DB',
     borderRadius: 12,
     paddingVertical: 13,
+    paddingHorizontal: 14,
     alignItems: 'center',
   },
   googleButtonText: {
     color: '#111827',
     fontSize: 15,
     fontWeight: '800',
+  },
+  switchGoogleLink: {
+    alignItems: 'center',
+    paddingVertical: 2,
+  },
+  switchGoogleLinkText: {
+    fontSize: 12.5,
+    fontWeight: '700',
+    color: '#1D4ED8',
+    textDecorationLine: 'underline',
   },
   dividerRow: {
     flexDirection: 'row',

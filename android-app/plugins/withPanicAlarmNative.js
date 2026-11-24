@@ -2,6 +2,7 @@ const fs = require('fs');
 const path = require('path');
 const {
   withAndroidManifest,
+  withAppBuildGradle,
   withDangerousMod,
   withMainActivity,
   withMainApplication,
@@ -212,11 +213,61 @@ function withAlarmManifestAttributes(config) {
   });
 }
 
+/**
+ * 5. Configura signingConfigs.release leyendo android-app/keystore/key.properties
+ *    cuando existe (para builds firmados de Google Play sin hardcodear claves en Git).
+ */
+function withReleaseSigningConfig(config) {
+  return withAppBuildGradle(config, (modConfig) => {
+    let contents = modConfig.modResults.contents;
+    if (contents.includes('keystorePropertiesFile')) {
+      return modConfig;
+    }
+
+    const loaderSnippet = `
+def keystorePropertiesFile = rootProject.file("../keystore/key.properties")
+def keystoreProperties = new Properties()
+def hasReleaseKeystore = keystorePropertiesFile.exists()
+if (hasReleaseKeystore) {
+    keystorePropertiesFile.withInputStream { keystoreProperties.load(it) }
+}
+`;
+
+    contents = contents.replace(
+      'android {',
+      `${loaderSnippet}\nandroid {`
+    );
+
+    contents = contents.replace(
+      /signingConfigs\s*\{\s*debug\s*\{/,
+      `signingConfigs {
+        release {
+            if (hasReleaseKeystore) {
+                storeFile rootProject.file("../keystore/" + keystoreProperties['storeFile'])
+                storePassword keystoreProperties['storePassword']
+                keyAlias keystoreProperties['keyAlias']
+                keyPassword keystoreProperties['keyPassword']
+            }
+        }
+        debug {`
+    );
+
+    contents = contents.replace(
+      /release\s*\{([\s\S]*?)signingConfig\s+signingConfigs\.debug/,
+      'release {$1signingConfig hasReleaseKeystore ? signingConfigs.release : signingConfigs.debug'
+    );
+
+    modConfig.modResults.contents = contents;
+    return modConfig;
+  });
+}
+
 module.exports = function withPanicAlarmNative(config) {
   let updated = config;
   updated = withCopyNativeAlarmFiles(updated);
   updated = withRegisterPanicAlarmPackage(updated);
   updated = withLockScreenMainActivity(updated);
   updated = withAlarmManifestAttributes(updated);
+  updated = withReleaseSigningConfig(updated);
   return updated;
 };

@@ -1,3 +1,4 @@
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import type { Session, User } from '@supabase/supabase-js';
 import * as WebBrowser from 'expo-web-browser';
 import { Linking, Platform } from 'react-native';
@@ -253,19 +254,61 @@ export function extractOAuthCallbackParams(callbackUrl: string): OAuthCallbackPa
   };
 }
 
+const LAST_GOOGLE_EMAIL_KEY = 'bh_last_google_email';
+
+export async function getLastGoogleEmail(): Promise<string | null> {
+  try {
+    if (AsyncStorage && typeof AsyncStorage.getItem === 'function') {
+      const saved = await AsyncStorage.getItem(LAST_GOOGLE_EMAIL_KEY);
+      return saved?.trim() || null;
+    }
+  } catch {
+    // Ignorar error de almacenamiento
+  }
+  return null;
+}
+
+async function saveLastGoogleEmail(email?: string | null): Promise<void> {
+  if (!email || isSyntheticPhoneEmail(email)) {
+    return;
+  }
+  try {
+    if (AsyncStorage && typeof AsyncStorage.setItem === 'function') {
+      await AsyncStorage.setItem(LAST_GOOGLE_EMAIL_KEY, email.trim().toLowerCase());
+    }
+  } catch {
+    // Ignorar error de almacenamiento
+  }
+}
+
 /**
  * Inicia sesión con Google OAuth (PKCE) mediante expo-web-browser.
+ * Recuerda la última cuenta de Google (`login_hint`) para no mostrar el selector
+ * salvo que se pase `forceSelectAccount: true`.
  */
-export async function signInWithGoogle(): Promise<{
+export async function signInWithGoogle(options?: {
+  forceSelectAccount?: boolean;
+}): Promise<{
   cancelled: boolean;
   session: Session | null;
 }> {
   const supabase = getSupabaseClient();
+  const forceSelect = Boolean(options?.forceSelectAccount);
+  const lastGoogleEmail = forceSelect ? null : await getLastGoogleEmail();
+
+  const queryParams: Record<string, string> = {};
+  if (forceSelect) {
+    queryParams.prompt = 'select_account';
+  } else if (lastGoogleEmail) {
+    queryParams.login_hint = lastGoogleEmail;
+  }
+
   const { data, error } = await supabase.auth.signInWithOAuth({
     provider: 'google',
     options: {
       redirectTo: OAUTH_REDIRECT_URI,
       skipBrowserRedirect: true,
+      ...(Object.keys(queryParams).length > 0 ? { queryParams } : {}),
     },
   });
 
@@ -293,6 +336,7 @@ export async function signInWithGoogle(): Promise<{
     if (exchangeError) {
       throw exchangeError;
     }
+    await saveLastGoogleEmail(exchangeData.session?.user?.email);
     return { cancelled: false, session: exchangeData.session };
   }
 
@@ -304,6 +348,7 @@ export async function signInWithGoogle(): Promise<{
     if (sessionError) {
       throw sessionError;
     }
+    await saveLastGoogleEmail(sessionData.session?.user?.email);
     return { cancelled: false, session: sessionData.session };
   }
 
@@ -596,7 +641,7 @@ export function subscribeToGroupAlertsRealtime(
     .subscribe();
 
   return () => {
-    supabase.removeChannel(channel).catch(() => {});
+    supabase.removeChannel(channel).catch(() => { });
   };
 }
 
@@ -761,7 +806,7 @@ export async function deleteMyAccount(): Promise<void> {
   if (error) {
     throw error;
   }
-  await supabase.auth.signOut().catch(() => {});
+  await supabase.auth.signOut().catch(() => { });
 }
 
 // ============================================================================
@@ -1215,9 +1260,9 @@ export async function generateOfficialMinutePdf(
   const pdfUrl = String(raw.pdfUrl ?? (pdfPath ? getPublicMinutePdfUrl(pdfPath) : ''));
   const whatsappText = String(
     raw.whatsappText ??
-      (pdfUrl
-        ? `📄 Acta Oficial — Asociación Bello Horizonte\nDescarga el PDF aquí: ${pdfUrl}`
-        : '📄 Acta Oficial — Asociación Bello Horizonte')
+    (pdfUrl
+      ? `📄 Acta Oficial — Asociación Bello Horizonte\nDescarga el PDF aquí: ${pdfUrl}`
+      : '📄 Acta Oficial — Asociación Bello Horizonte')
   );
   const whatsappShareUrl = String(
     raw.whatsappShareUrl ?? buildWhatsAppShareUrl(whatsappText)

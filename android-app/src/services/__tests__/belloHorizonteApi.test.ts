@@ -6,6 +6,16 @@ const mockSignInWithOAuth = jest.fn();
 const mockExchangeCodeForSession = jest.fn();
 const mockSetSession = jest.fn();
 const mockOpenAuthSessionAsync = jest.fn();
+const mockAsyncGetItem = jest.fn();
+const mockAsyncSetItem = jest.fn();
+
+jest.mock('@react-native-async-storage/async-storage', () => ({
+  __esModule: true,
+  default: {
+    getItem: (...args: unknown[]) => mockAsyncGetItem(...args),
+    setItem: (...args: unknown[]) => mockAsyncSetItem(...args),
+  },
+}));
 
 jest.mock('react-native', () => ({
   Platform: { OS: 'android', constants: { Brand: 'OPPO', Model: 'CPH2525' } },
@@ -67,6 +77,8 @@ describe('belloHorizonteApi', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     mockSignOut.mockResolvedValue({ error: null });
+    mockAsyncGetItem.mockResolvedValue(null);
+    mockAsyncSetItem.mockResolvedValue(undefined);
   });
 
   it('respeta las columnas seguras RLS (sin codigo en groups ni fcm_token en profiles)', () => {
@@ -269,6 +281,52 @@ describe('belloHorizonteApi', () => {
       accessToken: undefined,
       refreshToken: undefined,
       errorDescription: 'access_denied',
+    });
+  });
+
+  it('signInWithGoogle usa login_hint de la última cuenta y permite forceSelectAccount', async () => {
+    mockAsyncGetItem.mockResolvedValueOnce('raul.trelles@gmail.com');
+    mockSignInWithOAuth.mockResolvedValueOnce({
+      data: { url: 'https://supabase.co/auth/v1/authorize?provider=google' },
+      error: null,
+    });
+    mockOpenAuthSessionAsync.mockResolvedValueOnce({
+      type: 'success',
+      url: `${OAUTH_REDIRECT_URI}?code=pkce-hint`,
+    });
+    mockExchangeCodeForSession.mockResolvedValueOnce({
+      data: { session: { access_token: 'tok', user: { id: 'u-1', email: 'raul.trelles@gmail.com' } } },
+      error: null,
+    });
+
+    await signInWithGoogle();
+
+    expect(mockSignInWithOAuth).toHaveBeenCalledWith({
+      provider: 'google',
+      options: {
+        redirectTo: OAUTH_REDIRECT_URI,
+        skipBrowserRedirect: true,
+        queryParams: { login_hint: 'raul.trelles@gmail.com' },
+      },
+    });
+    expect(mockAsyncSetItem).toHaveBeenCalledWith('bh_last_google_email', 'raul.trelles@gmail.com');
+
+    // Cambiar de cuenta explícitamente fuerza prompt=select_account
+    mockSignInWithOAuth.mockResolvedValueOnce({
+      data: { url: 'https://supabase.co/auth/v1/authorize?provider=google' },
+      error: null,
+    });
+    mockOpenAuthSessionAsync.mockResolvedValueOnce({ type: 'cancel' });
+
+    await signInWithGoogle({ forceSelectAccount: true });
+
+    expect(mockSignInWithOAuth).toHaveBeenLastCalledWith({
+      provider: 'google',
+      options: {
+        redirectTo: OAUTH_REDIRECT_URI,
+        skipBrowserRedirect: true,
+        queryParams: { prompt: 'select_account' },
+      },
     });
   });
 

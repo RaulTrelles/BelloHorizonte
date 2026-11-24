@@ -14,15 +14,26 @@ export default ({ config }: ConfigContext): ExpoConfig => {
 
   return {
     ...config,
-    name: 'Bello Horizonte Alarma',
+    name: 'Bello Horizonte',
     slug: 'bello-horizonte-alarma',
     scheme: 'pe.bellohorizonte.alarma',
-    version: '0.1.0',
+    version: '1.0.0',
+    icon: './assets/icon.png',
+    splash: {
+      image: './assets/images/bello-horizonte-banner.png',
+      resizeMode: 'cover',
+      backgroundColor: '#0A6EE1',
+    },
     orientation: 'portrait',
     userInterfaceStyle: 'light',
     newArchEnabled: false,
     android: {
       package: 'pe.bellohorizonte.alarma',
+      versionCode: 2,
+      adaptiveIcon: {
+        foregroundImage: './assets/adaptive-icon.png',
+        backgroundColor: '#0A6EE1',
+      },
       ...(hasGoogleServicesFile ? { googleServicesFile: './google-services.json' } : {}),
       permissions: [
         'android.permission.POST_NOTIFICATIONS',
