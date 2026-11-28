@@ -16,6 +16,9 @@ serviceAccountKey.json
 *.keystore
 key.properties
 android-app/keystore/
+android-app/keystore.*
+*keystore*.rar
+*keystore*.zip
 
 # Logs locales del Agent Harness
 .agents/logs/

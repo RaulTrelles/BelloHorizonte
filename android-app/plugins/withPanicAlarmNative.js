@@ -4,6 +4,7 @@ const {
   withAndroidManifest,
   withAppBuildGradle,
   withDangerousMod,
+  withGradleProperties,
   withMainActivity,
   withMainApplication,
 } = require('expo/config-plugins');
@@ -262,6 +263,26 @@ if (hasReleaseKeystore) {
   });
 }
 
+/**
+ * 6. Asegura compileSdkVersion=36 y targetSdkVersion=36 (Android 16 / Google Play) tras cada prebuild.
+ */
+function withAndroidSdk36(config) {
+  return withGradleProperties(config, (modConfig) => {
+    const props = modConfig.modResults;
+    const upsert = (key, value) => {
+      const idx = props.findIndex((p) => p.type === 'property' && p.key === key);
+      if (idx >= 0) {
+        props[idx].value = value;
+      } else {
+        props.push({ type: 'property', key, value });
+      }
+    };
+    upsert('android.compileSdkVersion', '36');
+    upsert('android.targetSdkVersion', '36');
+    return modConfig;
+  });
+}
+
 module.exports = function withPanicAlarmNative(config) {
   let updated = config;
   updated = withCopyNativeAlarmFiles(updated);
@@ -269,5 +290,6 @@ module.exports = function withPanicAlarmNative(config) {
   updated = withLockScreenMainActivity(updated);
   updated = withAlarmManifestAttributes(updated);
   updated = withReleaseSigningConfig(updated);
+  updated = withAndroidSdk36(updated);
   return updated;
 };

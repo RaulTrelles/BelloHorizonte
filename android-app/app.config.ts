@@ -6,7 +6,11 @@ const googleServicesPath = path.resolve(__dirname, 'google-services.json');
 const hasGoogleServicesFile = fs.existsSync(googleServicesPath);
 
 export default ({ config }: ConfigContext): ExpoConfig => {
-  const plugins: ExpoConfig['plugins'] = ['./plugins/withPanicAlarmNative.js'];
+  const plugins: ExpoConfig['plugins'] = [
+    'expo-asset',
+    'expo-web-browser',
+    './plugins/withPanicAlarmNative.js',
+  ];
 
   if (hasGoogleServicesFile) {
     plugins.unshift('@react-native-firebase/app');
@@ -17,7 +21,7 @@ export default ({ config }: ConfigContext): ExpoConfig => {
     name: 'Bello Horizonte',
     slug: 'bello-horizonte-alarma',
     scheme: 'pe.bellohorizonte.alarma',
-    version: '1.0.0',
+    version: '1.0.1',
     icon: './assets/icon.png',
     splash: {
       image: './assets/images/bello-horizonte-banner.png',
@@ -29,7 +33,7 @@ export default ({ config }: ConfigContext): ExpoConfig => {
     newArchEnabled: false,
     android: {
       package: 'pe.bellohorizonte.alarma',
-      versionCode: 4,
+      versionCode: 5,
       adaptiveIcon: {
         foregroundImage: './assets/adaptive-icon.png',
         backgroundColor: '#0A6EE1',
